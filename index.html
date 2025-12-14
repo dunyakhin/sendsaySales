@@ -6,14 +6,13 @@
   <style>
     body { font-family: Arial, sans-serif; padding: 20px; }
     pre { background: #f5f5f5; padding: 10px; border-radius: 5px; overflow: auto; }
-    .error { color: red; }
     .warning { color: orange; }
   </style>
 </head>
 <body>
   <h1>Загрузите Excel файл</h1>
   <input type="file" id="inputExcel" accept=".xlsx, .xls">
-  <h2>JSON для Sendsay (по каждому заказу):</h2>
+  <h2>JSON для Sendsay (по заказам):</h2>
   <pre id="output"></pre>
 
   <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
@@ -42,44 +41,50 @@
             return;
           }
 
+          // Читаем заголовки, убираем лишние пробелы и приводим к нижнему регистру
           const headers = rows.shift().map(h => h.toString().trim().toLowerCase());
-          const findHeader = name => headers.findIndex(h => h.includes(name.toLowerCase()));
+
+          const findHeader = name => headers.findIndex(h => h === name.toLowerCase().trim());
 
           const idx = {
-            email: findHeader("EMAIL Покупателя   "),
-            orderId: findHeader("номер заказа"),
-            seat: findHeader("id места"),
-            ticketNumber: findHeader("№ позиции"),
-            price: findHeader("оплата"),
-            name: findHeader("действие"),
-            date: findHeader("дата"),
-            time: findHeader("время")
+            email: findHeader("EMAIL Покупателя".toLowerCase()),
+            orderId: findHeader("Номер Заказа".toLowerCase()),
+            seat: findHeader("ID места/SEAT_ID".toLowerCase()),
+            barcode: findHeader("Штрихкод/BARCODE".toLowerCase()),
+            ticketNumber: findHeader("№ позиции".toLowerCase()),
+            price: findHeader("Оплата  (руб.)".toLowerCase()),
+            name: findHeader("Действие".toLowerCase()),
+            date: findHeader("Дата".toLowerCase()),
+            time: findHeader("Время".toLowerCase())
           };
 
           const orders = {};
           rows.forEach(row => {
             const ord = row[idx.orderId];
-            if (!ord || !row[idx.email]) return;
+            const email = row[idx.email];
+            if (!ord || !email) return;
 
             if (!orders[ord]) {
               orders[ord] = {
-                email: row[idx.email],
+                email: email,
                 transaction_id: ord.toString(),
                 transaction_status: 1,
                 transaction_dt: `${row[idx.date] || ""} ${row[idx.time] || ""}`,
-                transaction_sum: Number(row[idx.price] || 0),
+                transaction_sum: 0,
                 items: []
               };
             }
 
+            const ticketPrice = Number(row[idx.price] || 0);
+
             orders[ord].items.push({
-              id: row[idx.seat] || "",
+              id: row[idx.seat] || row[idx.barcode] || "",
               name: row[idx.name] || `Билет ${row[idx.ticketNumber] || ""}`,
-              price: Number(row[idx.price] || 0),
+              price: ticketPrice,
               qnt: 1
             });
 
-            orders[ord].transaction_sum += Number(row[idx.price] || 0);
+            orders[ord].transaction_sum += ticketPrice;
           });
 
           const result = Object.values(orders);
@@ -89,8 +94,10 @@
           output.textContent = "Ошибка:\n" + err.message;
         }
       };
+
       reader.readAsArrayBuffer(file);
     });
   </script>
 </body>
 </html>
+
