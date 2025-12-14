@@ -1,29 +1,20 @@
 from fastapi import FastAPI, File, UploadFile, Form
-from fastapi.responses import HTMLResponse
-from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
 import requests
 from collections import defaultdict
-from starlette.requests import Request
 
 app = FastAPI()
 
+# Разрешаем CORS (для фронтенда на GitHub Pages)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # здесь можно указать домен GitHub Pages
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-templates = Jinja2Templates(directory="templates")
-
-SENDSAY_API_URL = "https://api.sendsay.ru"
-
-@app.get("/", response_class=HTMLResponse)
-async def index(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+SENDSAY_API_URL = "https://api.sendsay.ru"  # URL API Sendsay
 
 @app.post("/upload_excel/")
 async def upload_excel(
@@ -31,7 +22,10 @@ async def upload_excel(
     login: str = Form(...),
     api_key: str = Form(...)
 ):
+    # Чтение Excel
     df = pd.read_excel(file.file)
+
+    # Проверка обязательных колонок
     required_columns = [
         "№ позиции","Id Действия","Действие","Дата","Время","Рег.номер билета",
         "Штрихкод/BARCODE","Время создания билета","Оплата  (руб.)","ID места/SEAT_ID",
@@ -40,6 +34,7 @@ async def upload_excel(
     if not all(col in df.columns for col in required_columns):
         return {"error": "Не все необходимые колонки присутствуют в Excel"}
 
+    # Группировка по EMAIL Покупателя
     orders = defaultdict(list)
     for _, row in df.iterrows():
         email = row["EMAIL Покупателя"]
@@ -60,11 +55,12 @@ async def upload_excel(
         }
         orders[email].append(ticket)
 
+    # Формируем список заказов
     parsed_data = []
     for email, tickets in orders.items():
         parsed_data.append({
             "email": email,
-            "order_id": tickets[0]["order_id"],
+            "order_id": tickets[0]["order_id"],  # id транзакции = номер заказа
             "tickets": tickets,
             "total_amount": sum(t["price"] for t in tickets)
         })
@@ -81,14 +77,25 @@ async def send_sendsay(data: dict):
         return {"error": "Не указан login или api_key"}
 
     payload = {
-        "method": "ecom.data.add",
+        "method": "ecom.data.add",  # метод по документации
         "params": {"data": sales_data}
     }
 
-    response = requests.post(
-        SENDSAY_API_URL,
-        json=payload,
-        auth=(login, api_key)
-    )
+    try:
+        response = requests.post(
+            SENDSAY_API_URL,
+            json=payload,
+            auth=(login, api_key)
+        )
+        result = response.json()
+        status_code = response.status_code
+    except Exception as e:
+        result = {"error": str(e)}
+        status_code = 500
 
-    return {"status": response.status_code, "response": response.json()}
+    return {"status": status_code, "response": result}
+
+# Точка запуска через waitress-serve
+if __name__ == "__main__":
+    from waitress import serve
+    serve(app, host="0.0.0.0", port=8000)
