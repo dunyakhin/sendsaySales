@@ -2,13 +2,15 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
-  <title>Парсер Excel для Sendsay</title>
+  <title>Excel → Sendsay JSON Парсер</title>
 </head>
 <body>
-  <h1>Загрузите Excel файл</h1>
+  <h1>Загрузите Excel файл с билетами</h1>
   <input type="file" id="inputExcel" accept=".xlsx, .xls">
+  <h2>Результат JSON для Sendsay:</h2>
   <pre id="output"></pre>
 
+  <!-- Подключаем SheetJS -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
   <script>
     const input = document.getElementById('inputExcel');
@@ -26,52 +28,59 @@
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
 
-        // Преобразуем в массив массивов (строки)
+        // Преобразуем лист в массив массивов
         const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-        const headers = rows.shift(); // первая строка — заголовки
 
-        // Находим индексы нужных столбцов
+        if (rows.length < 2) {
+          output.textContent = "Файл пустой или нет данных!";
+          return;
+        }
+
+        // Чистим заголовки: убираем пробелы и переводим в нижний регистр
+        const headers = rows.shift().map(h => h.toString().trim().toLowerCase());
+
+        // Функция для гибкого поиска столбца
+        const findHeader = name => headers.findIndex(h => h.includes(name.toLowerCase()));
+
         const idx = {
-          email: headers.indexOf("EMAIL Покупателя   "),
-          orderId: headers.indexOf("Номер Заказа"),
-          seat: headers.indexOf("ID места/SEAT_ID"),
-          ticketNumber: headers.indexOf("№ позиции"),
-          price: headers.indexOf("Оплата (руб.)"),
-          fio: headers.indexOf("ФИО Покупателя"),
-          date: headers.indexOf("Дата"),
-          time: headers.indexOf("Время")
+          email: findHeader("email"),
+          orderId: findHeader("номер заказа"),
+          seat: findHeader("id места"),
+          ticketNumber: findHeader("№ позиции"),
+          price: findHeader("оплата"),
+          fio: findHeader("фио"),
+          date: findHeader("дата"),
+          time: findHeader("время"),
+          barcode: findHeader("штрихкод")
         };
 
-        // Формируем JSON
-        const orders = {};
-        rows.forEach(row => {
-          const orderId = row[idx.orderId];
-          if (!orders[orderId]) {
-            orders[orderId] = {
-              email: row[idx.email],
-              tickets: []
-            };
-          }
+        // Проверка: все поля найдены
+        for (const key in idx) {
+          if (idx[key] === -1) console.warn(`Не найден столбец: ${key}`);
+        }
 
-          orders[orderId].tickets.push({
-            ticketNumber: row[idx.ticketNumber],
-            seat: row[idx.seat],
-            price: row[idx.price],
-            fio: row[idx.fio],
+        // Формируем массив продаж для Sendsay
+        const sales = [];
+        rows.forEach(row => {
+          // Пропускаем строки без email или orderId
+          if (!row[idx.email] || !row[idx.orderId]) return;
+
+          sales.push({
+            email: row[idx.email],
+            orderid: row[idx.orderId],
+            title: `Билет ${row[idx.ticketNumber]} (место ${row[idx.seat] || row[idx.barcode]})`,
+            price: Number(row[idx.price] || 0),
             date: row[idx.date],
-            time: row[idx.time]
+            quantity: 1,
+            externalid: row[idx.seat] || row[idx.barcode],
+            fio: row[idx.fio] || "",
+            time: row[idx.time] || ""
           });
         });
 
-        // Преобразуем в массив для Sendsay
-        const result = Object.keys(orders).map(orderId => ({
-          orderId: orderId,
-          email: orders[orderId].email,
-          tickets: orders[orderId].tickets
-        }));
-
-        output.textContent = JSON.stringify(result, null, 2);
+        output.textContent = JSON.stringify(sales, null, 2);
       };
+
       reader.readAsArrayBuffer(file);
     });
   </script>
