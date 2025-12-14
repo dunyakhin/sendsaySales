@@ -1,25 +1,79 @@
-[
-  {
-    "orderId": "12345",
-    "email": "client@example.com",
-    "tickets": [
-      {
-        "ticketNumber": 1,
-        "seat": "A1",
-        "price": 1000,
-        "fio": "Иван Иванов",
-        "date": "2025-12-14",
-        "time": "19:00"
-      },
-      {
-        "ticketNumber": 2,
-        "seat": "A2",
-        "price": 1000,
-        "fio": "Иван Иванов",
-        "date": "2025-12-14",
-        "time": "19:00"
-      }
-    ]
-  }
-]
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Парсер Excel для Sendsay</title>
+</head>
+<body>
+  <h1>Загрузите Excel файл</h1>
+  <input type="file" id="inputExcel" accept=".xlsx, .xls">
+  <pre id="output"></pre>
 
+  <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+  <script>
+    const input = document.getElementById('inputExcel');
+    const output = document.getElementById('output');
+
+    input.addEventListener('change', function(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+
+        // Преобразуем в массив массивов (строки)
+        const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+        const headers = rows.shift(); // первая строка — заголовки
+
+        // Находим индексы нужных столбцов
+        const idx = {
+          email: headers.indexOf("EMAIL Покупателя"),
+          orderId: headers.indexOf("Номер Заказа"),
+          seat: headers.indexOf("ID места/SEAT_ID"),
+          ticketNumber: headers.indexOf("№ позиции"),
+          price: headers.indexOf("Оплата (руб.)"),
+          fio: headers.indexOf("ФИО Покупателя"),
+          date: headers.indexOf("Дата"),
+          time: headers.indexOf("Время")
+        };
+
+        // Формируем JSON
+        const orders = {};
+        rows.forEach(row => {
+          const orderId = row[idx.orderId];
+          if (!orders[orderId]) {
+            orders[orderId] = {
+              email: row[idx.email],
+              tickets: []
+            };
+          }
+
+          orders[orderId].tickets.push({
+            ticketNumber: row[idx.ticketNumber],
+            seat: row[idx.seat],
+            price: row[idx.price],
+            fio: row[idx.fio],
+            date: row[idx.date],
+            time: row[idx.time]
+          });
+        });
+
+        // Преобразуем в массив для Sendsay
+        const result = Object.keys(orders).map(orderId => ({
+          orderId: orderId,
+          email: orders[orderId].email,
+          tickets: orders[orderId].tickets
+        }));
+
+        output.textContent = JSON.stringify(result, null, 2);
+      };
+      reader.readAsArrayBuffer(file);
+    });
+  </script>
+</body>
+</html>
