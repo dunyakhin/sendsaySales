@@ -3,6 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <title>Excel → Sendsay JSON Парсер</title>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 20px; }
+    pre { background: #f5f5f5; padding: 10px; border-radius: 5px; max-height: 500px; overflow: auto; }
+    .error { color: red; }
+    .warning { color: orange; }
+  </style>
 </head>
 <body>
   <h1>Загрузите Excel файл с билетами</h1>
@@ -10,7 +16,6 @@
   <h2>Результат JSON для Sendsay:</h2>
   <pre id="output"></pre>
 
-  <!-- Подключаем SheetJS -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
   <script>
     const input = document.getElementById('inputExcel');
@@ -18,67 +23,80 @@
 
     input.addEventListener('change', function(e) {
       const file = e.target.files[0];
-      if (!file) return;
+      if (!file) {
+        output.textContent = "Файл не выбран.";
+        return;
+      }
 
       const reader = new FileReader();
       reader.onload = function(e) {
-        const data = new Uint8Array(e.target.result);
-        const workbook = XLSX.read(data, { type: 'array' });
+        try {
+          const data = new Uint8Array(e.target.result);
+          const workbook = XLSX.read(data, { type: 'array' });
 
-        const sheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[sheetName];
+          const sheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[sheetName];
 
-        // Преобразуем лист в массив массивов
-        const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+          // Чтение всех строк
+          const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "" });
 
-        if (rows.length < 2) {
-          output.textContent = "Файл пустой или нет данных!";
-          return;
-        }
+          if (rows.length < 2) {
+            output.textContent = "Файл пустой или нет данных!";
+            return;
+          }
 
-        // Чистим заголовки: убираем пробелы и переводим в нижний регистр
-        const headers = rows.shift().map(h => h.toString().trim().toLowerCase());
+          // Заголовки
+          const headers = rows.shift().map(h => h.toString().trim().toLowerCase());
+          console.log("Заголовки:", headers);
 
-        // Функция для гибкого поиска столбца
-        const findHeader = name => headers.findIndex(h => h.includes(name.toLowerCase()));
+          const findHeader = name => headers.findIndex(h => h.includes(name.toLowerCase()));
 
-        const idx = {
-          email: findHeader("email"),
-          orderId: findHeader("номер заказа"),
-          seat: findHeader("id места"),
-          ticketNumber: findHeader("№ позиции"),
-          price: findHeader("оплата"),
-          fio: findHeader("фио"),
-          date: findHeader("дата"),
-          time: findHeader("время"),
-          barcode: findHeader("штрихкод")
-        };
+          const idx = {
+            email: findHeader("email"),
+            orderId: findHeader("номер заказа"),
+            seat: findHeader("id места"),
+            ticketNumber: findHeader("№ позиции"),
+            price: findHeader("оплата"),
+            fio: findHeader("фио"),
+            date: findHeader("дата"),
+            time: findHeader("время"),
+            barcode: findHeader("штрихкод")
+          };
 
-        // Проверка: все поля найдены
-        for (const key in idx) {
-          if (idx[key] === -1) console.warn(`Не найден столбец: ${key}`);
-        }
+          // Проверка найденных полей
+          const warnings = [];
+          for (const key in idx) {
+            if (idx[key] === -1) warnings.push(`Не найден столбец: ${key}`);
+          }
 
-        // Формируем массив продаж для Sendsay
-        const sales = [];
-        rows.forEach(row => {
-          // Пропускаем строки без email или orderId
-          if (!row[idx.email] || !row[idx.orderId]) return;
+          const sales = [];
+          rows.forEach((row, i) => {
+            if (!row[idx.email] || !row[idx.orderId]) return;
 
-          sales.push({
-            email: row[idx.email],
-            orderid: row[idx.orderId],
-            title: `Билет ${row[idx.ticketNumber]} (место ${row[idx.seat] || row[idx.barcode]})`,
-            price: Number(row[idx.price] || 0),
-            date: row[idx.date],
-            quantity: 1,
-            externalid: row[idx.seat] || row[idx.barcode],
-            fio: row[idx.fio] || "",
-            time: row[idx.time] || ""
+            sales.push({
+              email: row[idx.email],
+              orderid: row[idx.orderId].toString(),
+              title: `Билет ${row[idx.ticketNumber] || i+1} (место ${row[idx.seat] || row[idx.barcode] || "N/A"})`,
+              price: Number(row[idx.price] || 0),
+              date: row[idx.date] || "",
+              quantity: 1,
+              externalid: row[idx.seat] || row[idx.barcode] || "",
+              fio: row[idx.fio] || "",
+              time: row[idx.time] || ""
+            });
           });
-        });
 
-        output.textContent = JSON.stringify(sales, null, 2);
+          // Выводим ошибки и предупреждения
+          let text = "";
+          if (warnings.length) text += warnings.map(w => `⚠️ ${w}`).join("\n") + "\n\n";
+          if (sales.length === 0) text += "❌ Не найдено ни одного билета с email и номером заказа.";
+          else text += JSON.stringify(sales, null, 2);
+
+          output.textContent = text;
+
+        } catch (err) {
+          output.textContent = "Ошибка при чтении файла:\n" + err.message;
+        }
       };
 
       reader.readAsArrayBuffer(file);
@@ -86,3 +104,4 @@
   </script>
 </body>
 </html>
+
