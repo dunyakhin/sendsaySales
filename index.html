@@ -2,18 +2,18 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
-  <title>Excel → Sendsay JSON Парсер</title>
+  <title>Excel → Sendsay Order JSON</title>
   <style>
     body { font-family: Arial, sans-serif; padding: 20px; }
-    pre { background: #f5f5f5; padding: 10px; border-radius: 5px; max-height: 500px; overflow: auto; }
+    pre { background: #f5f5f5; padding: 10px; border-radius: 5px; overflow: auto; }
     .error { color: red; }
     .warning { color: orange; }
   </style>
 </head>
 <body>
-  <h1>Загрузите Excel файл с билетами</h1>
+  <h1>Загрузите Excel файл</h1>
   <input type="file" id="inputExcel" accept=".xlsx, .xls">
-  <h2>Результат JSON для Sendsay:</h2>
+  <h2>JSON для Sendsay (по каждому заказу):</h2>
   <pre id="output"></pre>
 
   <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
@@ -33,75 +33,64 @@
         try {
           const data = new Uint8Array(e.target.result);
           const workbook = XLSX.read(data, { type: 'array' });
-
           const sheetName = workbook.SheetNames[0];
           const worksheet = workbook.Sheets[sheetName];
 
-          // Чтение всех строк
           const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "" });
-
           if (rows.length < 2) {
-            output.textContent = "Файл пустой или нет данных!";
+            output.textContent = "Нет данных!";
             return;
           }
 
-          // Заголовки
           const headers = rows.shift().map(h => h.toString().trim().toLowerCase());
-          console.log("Заголовки:", headers);
-
           const findHeader = name => headers.findIndex(h => h.includes(name.toLowerCase()));
 
           const idx = {
-            email: findHeader("email"),
+            email: findHeader("EMAIL Покупателя   "),
             orderId: findHeader("номер заказа"),
             seat: findHeader("id места"),
             ticketNumber: findHeader("№ позиции"),
             price: findHeader("оплата"),
-            fio: findHeader("фио"),
+            name: findHeader("действие"),
             date: findHeader("дата"),
-            time: findHeader("время"),
-            barcode: findHeader("штрихкод")
+            time: findHeader("время")
           };
 
-          // Проверка найденных полей
-          const warnings = [];
-          for (const key in idx) {
-            if (idx[key] === -1) warnings.push(`Не найден столбец: ${key}`);
-          }
+          const orders = {};
+          rows.forEach(row => {
+            const ord = row[idx.orderId];
+            if (!ord || !row[idx.email]) return;
 
-          const sales = [];
-          rows.forEach((row, i) => {
-            if (!row[idx.email] || !row[idx.orderId]) return;
+            if (!orders[ord]) {
+              orders[ord] = {
+                email: row[idx.email],
+                transaction_id: ord.toString(),
+                transaction_status: 1,
+                transaction_dt: `${row[idx.date] || ""} ${row[idx.time] || ""}`,
+                transaction_sum: Number(row[idx.price] || 0),
+                items: []
+              };
+            }
 
-            sales.push({
-              email: row[idx.email],
-              orderid: row[idx.orderId].toString(),
-              title: `Билет ${row[idx.ticketNumber] || i+1} (место ${row[idx.seat] || row[idx.barcode] || "N/A"})`,
+            orders[ord].items.push({
+              id: row[idx.seat] || "",
+              name: row[idx.name] || `Билет ${row[idx.ticketNumber] || ""}`,
               price: Number(row[idx.price] || 0),
-              date: row[idx.date] || "",
-              quantity: 1,
-              externalid: row[idx.seat] || row[idx.barcode] || "",
-              fio: row[idx.fio] || "",
-              time: row[idx.time] || ""
+              qnt: 1
             });
+
+            orders[ord].transaction_sum += Number(row[idx.price] || 0);
           });
 
-          // Выводим ошибки и предупреждения
-          let text = "";
-          if (warnings.length) text += warnings.map(w => `⚠️ ${w}`).join("\n") + "\n\n";
-          if (sales.length === 0) text += "❌ Не найдено ни одного билета с email и номером заказа.";
-          else text += JSON.stringify(sales, null, 2);
-
-          output.textContent = text;
+          const result = Object.values(orders);
+          output.textContent = JSON.stringify(result, null, 2);
 
         } catch (err) {
-          output.textContent = "Ошибка при чтении файла:\n" + err.message;
+          output.textContent = "Ошибка:\n" + err.message;
         }
       };
-
       reader.readAsArrayBuffer(file);
     });
   </script>
 </body>
 </html>
-
