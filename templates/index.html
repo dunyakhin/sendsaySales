@@ -90,7 +90,7 @@
             preview.innerHTML = "<p>Обработка файла...</p>";
 
             try {
-                const response = await fetch('https://<твой_логин>.pythonanywhere.com/upload_excel', { method: 'POST', body: formData });
+                const response = await fetch('https://dunyakhin.pythonanywhere.com/upload_excel', { method: 'POST', body: formData });
                 const data = await response.json();
                 if (data.error) {
                     preview.innerHTML = `<p class="text-red-500">${data.error}</p>`;
@@ -120,7 +120,7 @@
             preview.innerHTML = "<p>Отправка в Sendsay...</p>";
 
             try {
-                const response = await fetch('https://<твой_логин>.pythonanywhere.com/send_sendsay', {
+                const response = await fetch('https://dunyakhin.pythonanywhere.com/send_sendsay', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ login, api_key: apiKey, sales_data: parsedData })
