@@ -68,9 +68,9 @@
           const payment_dt = formatDate(payment_dt_raw);
           const transaction_dt = payment_dt; // дублируем payment_dt
 
-          // Генерация name из двух колонок
-          const actionKey = keyMap["действие"];
-          const dateKey = keyMap["дата действия"] || keyMap["действие дата"];
+          // Надежное объединение action + date
+          const actionKey = Object.keys(row).find(k => normalizeKey(k).includes("действие"));
+          const dateKey = Object.keys(row).find(k => normalizeKey(k).includes("дата") || normalizeKey(k).includes("дата действия") || normalizeKey(k).includes("действие дата"));
           const action = actionKey ? row[actionKey] : "";
           const date = dateKey ? row[dateKey] : "";
           const name = (action + " " + date).trim();
@@ -127,3 +127,4 @@
   </script>
 </body>
 </html>
+
