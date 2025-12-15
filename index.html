@@ -17,7 +17,21 @@
     const downloadBtn = document.getElementById('downloadBtn');
 
     function normalizeKey(key) {
-      return key.replace(/\s+/g, ' ').trim().toLowerCase(); // удаляем лишние пробелы и приводим к нижнему регистру
+      return key.replace(/\s+/g, ' ').trim().toLowerCase();
+    }
+
+    function formatDate(date) {
+      if (!date) return "";
+      let d = new Date(date);
+      if (isNaN(d)) {
+        // Попробуем распарсить как строку "08.11.2025 15:30"
+        const parts = date.toString().match(/(\d{2})\.(\d{2})\.(\d{4})\s*(\d{2}):(\d{2})/);
+        if (parts) {
+          d = new Date(parts[3], parts[2]-1, parts[1], parts[4], parts[5]);
+        } else return "";
+      }
+      const pad = n => n.toString().padStart(2,'0');
+      return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
     }
 
     function handleFile(e) {
@@ -37,33 +51,27 @@
           return;
         }
 
-        // Получаем словарь для нормализации ключей колонок
         const keyMap = {};
-        Object.keys(rows[0]).forEach(k => {
-          keyMap[normalizeKey(k)] = k;
-        });
+        Object.keys(rows[0]).forEach(k => keyMap[normalizeKey(k)] = k);
 
         const ordersMap = {};
 
         rows.forEach(row => {
-          const emailKey = keyMap["email покупателя"];
-          const orderKey = keyMap["номер заказа"];
-          const priceKey = keyMap["оплата (руб.)"];
-          const barcodeKey = keyMap["штрихкод/barcode"];
-          const actionKey = keyMap["действие"];
-          const dateKey = keyMap["действие дата"];
-          const channelKey = keyMap["канал продажи"];
-          const ticketTimeKey = keyMap["время создания билета"];
-          const transactionDtKey = keyMap["дата и время транзакции"];
+          const email = row[keyMap["email покупателя"]] || "";
+          const transaction_id = row[keyMap["номер заказа"]] || "";
+          const barcode = row[keyMap["штрихкод/barcode"]] || "";
+          const action = row[keyMap["действие"]] || "";
+          const date = row[keyMap["дата действия"]] || row[keyMap["действие дата"]] || "";
+          const category = row[keyMap["канал продажи"]] || "";
+          const payment_dt_raw = row[keyMap["время создания билета"]] || "";
+          const transaction_dt_raw = row[keyMap["дата и время транзакции"]] || "";
+          const price_val = parseFloat(row[keyMap["оплата (руб.)"]]) || 0;
 
-          const email = emailKey ? row[emailKey] : "";
-          const transaction_id = orderKey ? row[orderKey] : "";
-          const price = priceKey ? parseFloat(row[priceKey]) || 0 : 0;
-          const barcode = barcodeKey ? row[barcodeKey] : "";
-          const name = ((actionKey ? row[actionKey] : "") + " " + (dateKey ? row[dateKey] : "")).trim();
-          const category = channelKey ? row[channelKey] : "";
-          const payment_dt = ticketTimeKey ? row[ticketTimeKey] : "";
-          const transaction_dt = transactionDtKey ? row[transactionDtKey] : "";
+          const payment_dt = formatDate(payment_dt_raw);
+          const transaction_dt = formatDate(transaction_dt_raw);
+
+          const name = (action + " " + date).trim();
+          const price = price_val.toFixed(2);
 
           const key = transaction_id + "_" + email;
           if (!ordersMap[key]) {
@@ -89,13 +97,18 @@
             category: category
           });
 
-          ordersMap[key].transaction_sum += price;
+          ordersMap[key].transaction_sum += price_val;
         });
 
-        const result = Object.values(ordersMap);
+        const result = Object.values(ordersMap).map(order => {
+          return {
+            ...order,
+            transaction_sum: order.transaction_sum.toFixed(2)
+          };
+        });
+
         outputEl.textContent = JSON.stringify(result, null, 2);
 
-        // Кнопка для скачивания JSON
         downloadBtn.style.display = "inline-block";
         downloadBtn.onclick = () => {
           const blob = new Blob([JSON.stringify(result, null, 2)], {type: "application/json"});
