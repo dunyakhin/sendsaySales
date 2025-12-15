@@ -2,36 +2,47 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<title>Excel → Sendsay JSON (Orders API)</title>
+<title>Excel → Sendsay SSEC</title>
 <style>
-  body { font-family: Arial; padding: 20px; }
-  pre { background: #f5f5f5; padding: 10px; max-height: 400px; overflow: auto; white-space: pre-wrap; }
-  .log { color: #555; }
+  body { font-family: Arial, sans-serif; padding: 20px; }
+  button { padding: 6px 14px; }
+  pre {
+    background: #f5f5f5;
+    padding: 10px;
+    max-height: 420px;
+    overflow: auto;
+    white-space: pre-wrap;
+  }
+  .log { color:#555; }
 </style>
 </head>
 <body>
 
-<h2>Парсер Excel → JSON для Sendsay Orders API</h2>
+<h2>Excel → Sendsay (SSEC)</h2>
 
 <input type="file" id="file" accept=".xlsx,.xls">
-<button onclick="processFile()">Преобразовать</button>
+<br><br>
+<button onclick="processFile()">Обработать файл</button>
 
 <h3>Лог</h3>
 <pre id="log" class="log"></pre>
 
-<h3>JSON для Sendsay API</h3>
+<h3>JSON для Sendsay</h3>
 <pre id="out"></pre>
 
 <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+
 <script>
 function log(msg) {
-  document.getElementById("log").textContent += msg + "\n";
+  document.getElementById('log').textContent += msg + "\n";
 }
 
 function processFile() {
-  const input = document.getElementById("file");
-  const out = document.getElementById("out");
-  document.getElementById("log").textContent = "";
+  const input = document.getElementById('file');
+  const out = document.getElementById('out');
+  const logEl = document.getElementById('log');
+
+  logEl.textContent = "";
   out.textContent = "";
 
   if (!input.files.length) {
@@ -39,39 +50,33 @@ function processFile() {
     return;
   }
 
-  if (typeof XLSX === "undefined") {
-    log("❌ SheetJS не загружен");
-    return;
-  }
-
   const reader = new FileReader();
   reader.onload = e => {
     try {
-      log("📖 Чтение Excel...");
-      const wb = XLSX.read(new Uint8Array(e.target.result), { type: "array" });
+      const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
       const ws = wb.Sheets[wb.SheetNames[0]];
       const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
 
-      log("📊 Всего строк: " + rows.length);
-      if (rows.length < 2) {
-        log("❌ Нет данных");
-        return;
-      }
+      log("📊 Строк всего: " + rows.length);
+      if (rows.length < 2) return;
 
       const headers = rows.shift().map(h => h.toString().trim());
       log("🧾 Заголовки: " + headers.join(" | "));
 
-      const find = name =>
-        headers.findIndex(h => h.replace(/\s+/g, "").toLowerCase() === name.replace(/\s+/g, "").toLowerCase());
+      const col = name =>
+        headers.findIndex(h =>
+          h.replace(/\s+/g,'').toLowerCase() ===
+          name.replace(/\s+/g,'').toLowerCase()
+        );
 
       const idx = {
-        email: find("EMAIL Покупателя"),
-        order: find("Номер Заказа"),
-        price: find("Оплата  (руб.)"),
-        seat: find("ID места/SEAT_ID"),
-        action: find("Действие"),
-        date: find("Дата"),
-        time: find("Время")
+        email: col("EMAIL Покупателя"),
+        order: col("Номер Заказа"),
+        price: col("Оплата  (руб.)"),
+        seat: col("ID места/SEAT_ID"),
+        action: col("Действие"),
+        date: col("Дата"),
+        time: col("Время")
       };
 
       log("🔎 Индексы: " + JSON.stringify(idx));
@@ -86,7 +91,6 @@ function processFile() {
         if (!orders[orderId]) {
           orders[orderId] = {
             email: email,
-            addr_type: "email",
             transaction_id: String(orderId),
             transaction_dt: formatDT(r[idx.date], r[idx.time]),
             transaction_status: 1,
@@ -99,47 +103,64 @@ function processFile() {
 
         orders[orderId].items.push({
           id: r[idx.seat] || `ticket_${i+1}`,
-          qnt: 1,
+          name: r[idx.action] || "Билет",
           price: price,
-          name: r[idx.action] || ""
+          qnt: 1
         });
 
         orders[orderId].transaction_sum += price;
       });
 
-      const result = Object.values(orders);
+      // === SSEC формат с event_type = 5 ===
+      const result = Object.values(orders).map(o => ({
+        addr_type: "email",
+        addr: o.email,
+        event_type: 5,
+        data: {
+          transaction_id: o.transaction_id,
+          transaction_dt: o.transaction_dt,
+          transaction_status: o.transaction_status,
+          transaction_sum: o.transaction_sum,
+          items: o.items
+        }
+      }));
+
       out.textContent = JSON.stringify(result, null, 2);
-      log("✅ JSON сформирован. Заказов: " + result.length);
+      log("✅ Готово. Заказов: " + result.length);
 
     } catch (err) {
-      log("❌ Ошибка: " + err.message);
+      log("❌ JS ошибка: " + err.message);
     }
   };
 
   reader.readAsArrayBuffer(input.files[0]);
 }
 
+// === Excel-дата → строка ===
 function formatDT(d, t) {
   if (!d) return "";
+
   let dateObj;
 
   if (d instanceof Date) {
     dateObj = d;
   } else if (typeof d === "number") {
-    const parsed = XLSX.SSF.parse_date_code(d);
-    if (!parsed) return "";
-    dateObj = new Date(parsed.y, parsed.m - 1, parsed.d);
+    const p = XLSX.SSF.parse_date_code(d);
+    if (!p) return "";
+    dateObj = new Date(p.y, p.m - 1, p.d);
   } else if (typeof d === "string") {
     const parts = d.split(".");
-    if (parts.length === 3) dateObj = new Date(parts[2], parts[1] - 1, parts[0]);
-    else return "";
-  } else return "";
+    if (parts.length !== 3) return "";
+    dateObj = new Date(parts[2], parts[1] - 1, parts[0]);
+  } else {
+    return "";
+  }
 
   const yyyy = dateObj.getFullYear();
   const mm = String(dateObj.getMonth() + 1).padStart(2, "0");
   const dd = String(dateObj.getDate()).padStart(2, "0");
-
   const time = (typeof t === "string" && t.includes(":")) ? t : "00:00";
+
   return `${yyyy}-${mm}-${dd} ${time}:00`;
 }
 </script>
