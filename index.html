@@ -21,16 +21,25 @@
     }
 
     function formatDate(date) {
-      if (!date) return "";
+      if (!date && date !== 0) return "";
+
+      // Если это Excel serial date (число)
+      if (typeof date === "number") {
+        const d = XLSX.SSF.parse_date_code(date);
+        const pad = n => n.toString().padStart(2, '0');
+        return `${d.y}-${pad(d.m)}-${pad(d.d)} ${pad(d.H)}:${pad(d.M)}:${pad(d.S)}`;
+      }
+
+      // Если строка
       let d = new Date(date);
       if (isNaN(d)) {
         const parts = date.toString().match(/(\d{2})\.(\d{2})\.(\d{4})\s*(\d{2}):(\d{2})/);
         if (parts) {
-          d = new Date(parts[3], parts[2]-1, parts[1], parts[4], parts[5]);
+          d = new Date(parts[3], parts[2] - 1, parts[1], parts[4], parts[5]);
         } else return "";
       }
-      const pad = n => n.toString().padStart(2,'0');
-      return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+      const pad = n => n.toString().padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
     }
 
     function handleFile(e) {
@@ -38,7 +47,7 @@
       if (!file) return;
 
       const reader = new FileReader();
-      reader.onload = function(event) {
+      reader.onload = function (event) {
         const data = new Uint8Array(event.target.result);
         const workbook = XLSX.read(data, { type: 'array' });
         const sheetName = workbook.SheetNames[0];
@@ -63,8 +72,14 @@
           const barcode = row[keyMap["штрихкод/barcode"]] || "";
           const category = row[keyMap["канал продажи"]] || "";
           const payment_dt_raw = row[keyMap["время создания билета"]] || "";
-          const price_val = parseFloat(row[keyMap["оплата (руб.)"]]) || 0;
+          const price_raw = row[keyMap["оплата (руб.)"]];
 
+          // Преобразование цены в число
+          const price_val = price_raw !== undefined && price_raw !== null && price_raw !== "" 
+                            ? parseFloat(String(price_raw).replace(",", ".")) || 0 
+                            : 0;
+
+          // Форматирование даты
           const payment_dt = formatDate(payment_dt_raw);
           const transaction_dt = payment_dt; // дублируем payment_dt
 
@@ -113,7 +128,7 @@
 
         downloadBtn.style.display = "inline-block";
         downloadBtn.onclick = () => {
-          const blob = new Blob([JSON.stringify(result, null, 2)], {type: "application/json"});
+          const blob = new Blob([JSON.stringify(result, null, 2)], { type: "application/json" });
           const url = URL.createObjectURL(blob);
           const a = document.createElement("a");
           a.href = url;
@@ -127,4 +142,3 @@
   </script>
 </body>
 </html>
-
