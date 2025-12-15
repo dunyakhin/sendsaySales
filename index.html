@@ -5,14 +5,20 @@
 <title>Excel → Sendsay ORDER</title>
 <style>
   body { font-family: Arial; padding: 20px; }
-  pre { background:#f5f5f5; padding:10px; max-height:500px; overflow:auto; }
+  button { padding: 6px 12px; }
+  pre {
+    background: #f5f5f5;
+    padding: 10px;
+    max-height: 400px;
+    overflow: auto;
+  }
   .log { color:#555; }
   .error { color:red; }
 </style>
 </head>
 <body>
 
-<h2>Excel → Sendsay</h2>
+<h2>Excel → Sendsay (ORDER)</h2>
 
 <input type="file" id="file" accept=".xlsx,.xls">
 <br><br>
@@ -21,7 +27,7 @@
 <h3>Лог</h3>
 <pre id="log" class="log"></pre>
 
-<h3>JSON</h3>
+<h3>JSON для Sendsay</h3>
 <pre id="out"></pre>
 
 <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
@@ -34,8 +40,8 @@ function log(msg) {
 function processFile() {
   const input = document.getElementById('file');
   const out = document.getElementById('out');
-  out.textContent = "";
   document.getElementById('log').textContent = "";
+  out.textContent = "";
 
   if (!input.files.length) {
     log("❌ Файл не выбран");
@@ -43,32 +49,28 @@ function processFile() {
   }
 
   if (typeof XLSX === "undefined") {
-    log("❌ XLSX не загрузился (CDN)");
+    log("❌ XLSX не загрузился");
     return;
   }
 
   log("✅ Файл выбран");
 
   const reader = new FileReader();
-  reader.onerror = () => log("❌ Ошибка FileReader");
-
   reader.onload = e => {
     try {
-      log("📖 Чтение Excel");
-
       const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
       log("📄 Листов: " + wb.SheetNames.length);
 
       const ws = wb.Sheets[wb.SheetNames[0]];
       const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
 
-      log("📊 Строк: " + rows.length);
-
+      log("📊 Строк всего: " + rows.length);
       if (rows.length < 2) {
-        out.textContent = "❌ Нет данных";
+        log("❌ Нет данных");
         return;
       }
 
+      // Заголовки
       const headers = rows.shift().map(h => h.toString().trim());
       log("🧾 Заголовки: " + headers.join(" | "));
 
@@ -78,20 +80,21 @@ function processFile() {
         );
 
       const idx = {
-        email: col("EMAIL Покупателя"),
-        order: col("Номер Заказа"),
-        price: col("Оплата  (руб.)"),
-        seat: col("ID места/SEAT_ID"),
+        pos: col("№ позиции"),
         action: col("Действие"),
         date: col("Дата"),
-        time: col("Время")
+        time: col("Время"),
+        price: col("Оплата  (руб.)"),
+        seat: col("ID места/SEAT_ID"),
+        order: col("Номер Заказа"),
+        email: col("EMAIL Покупателя")
       };
 
       log("🔎 Индексы: " + JSON.stringify(idx));
 
       const orders = {};
 
-      rows.forEach(r => {
+      rows.forEach((r, i) => {
         if (!r[idx.email] || !r[idx.order]) return;
 
         if (!orders[r[idx.order]]) {
@@ -106,9 +109,10 @@ function processFile() {
         }
 
         const price = Number(r[idx.price] || 0);
+
         orders[r[idx.order]].items.push({
-          id: r[idx.seat],
-          name: r[idx.action],
+          id: r[idx.seat] || `ticket_${i+1}`,
+          name: r[idx.action] || `Билет ${r[idx.pos] || ""}`,
           price: price,
           qnt: 1
         });
@@ -134,12 +138,35 @@ function processFile() {
   reader.readAsArrayBuffer(input.files[0]);
 }
 
+// Универсальная обработка Excel-даты
 function formatDT(d, t) {
   if (!d) return "";
-  const [dd, mm, yyyy] = d.split(".");
-  return `${yyyy}-${mm}-${dd} ${t || "00:00"}:00`;
+
+  let dateObj;
+
+  if (d instanceof Date) {
+    dateObj = d;
+  } else if (typeof d === "number") {
+    const parsed = XLSX.SSF.parse_date_code(d);
+    if (!parsed) return "";
+    dateObj = new Date(parsed.y, parsed.m - 1, parsed.d);
+  } else if (typeof d === "string") {
+    const p = d.split(".");
+    if (p.length !== 3) return "";
+    dateObj = new Date(p[2], p[1] - 1, p[0]);
+  } else {
+    return "";
+  }
+
+  const yyyy = dateObj.getFullYear();
+  const mm = String(dateObj.getMonth() + 1).padStart(2, "0");
+  const dd = String(dateObj.getDate()).padStart(2, "0");
+  const time = (typeof t === "string" && t.includes(":")) ? t : "00:00";
+
+  return `${yyyy}-${mm}-${dd} ${time}:00`;
 }
 </script>
 
 </body>
 </html>
+
