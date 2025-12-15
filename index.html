@@ -8,10 +8,17 @@
 <body>
   <h1>Парсер Excel в JSON</h1>
   <input type="file" id="fileInput" accept=".xlsx, .xls">
+  <button id="downloadBtn" style="display:none;">Скачать JSON</button>
   <pre id="output"></pre>
 
   <script>
     document.getElementById('fileInput').addEventListener('change', handleFile, false);
+    const outputEl = document.getElementById('output');
+    const downloadBtn = document.getElementById('downloadBtn');
+
+    function normalizeKey(key) {
+      return key.replace(/\s+/g, ' ').trim().toLowerCase(); // удаляем лишние пробелы и приводим к нижнему регистру
+    }
 
     function handleFile(e) {
       const file = e.target.files[0];
@@ -25,19 +32,49 @@
         const sheet = workbook.Sheets[sheetName];
         const rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
 
+        if (!rows.length) {
+          outputEl.textContent = "Файл пустой или неправильно распознан";
+          return;
+        }
+
+        // Получаем словарь для нормализации ключей колонок
+        const keyMap = {};
+        Object.keys(rows[0]).forEach(k => {
+          keyMap[normalizeKey(k)] = k;
+        });
+
         const ordersMap = {};
 
         rows.forEach(row => {
-          const key = row["Номер Заказа"] + "_" + row["EMAIL Покупателя"];
+          const emailKey = keyMap["email покупателя"];
+          const orderKey = keyMap["номер заказа"];
+          const priceKey = keyMap["оплата (руб.)"];
+          const barcodeKey = keyMap["штрихкод/barcode"];
+          const actionKey = keyMap["действие"];
+          const dateKey = keyMap["действие дата"];
+          const channelKey = keyMap["канал продажи"];
+          const ticketTimeKey = keyMap["время создания билета"];
+          const transactionDtKey = keyMap["дата и время транзакции"];
+
+          const email = emailKey ? row[emailKey] : "";
+          const transaction_id = orderKey ? row[orderKey] : "";
+          const price = priceKey ? parseFloat(row[priceKey]) || 0 : 0;
+          const barcode = barcodeKey ? row[barcodeKey] : "";
+          const name = ((actionKey ? row[actionKey] : "") + " " + (dateKey ? row[dateKey] : "")).trim();
+          const category = channelKey ? row[channelKey] : "";
+          const payment_dt = ticketTimeKey ? row[ticketTimeKey] : "";
+          const transaction_dt = transactionDtKey ? row[transactionDtKey] : "";
+
+          const key = transaction_id + "_" + email;
           if (!ordersMap[key]) {
             ordersMap[key] = {
-              email: row["EMAIL Покупателя"] || "",
+              email: email,
               addr_type: "email",
-              transaction_id: row["Номер Заказа"] || "",
+              transaction_id: transaction_id,
               transaction_status: 1,
-              transaction_dt: row["Дата и время транзакции"] || "",
+              transaction_dt: transaction_dt,
               transaction_sum: 0,
-              payment_dt: row["Время создания билета"] || "",
+              payment_dt: payment_dt,
               event_type: 1,
               update: 0,
               items: []
@@ -45,18 +82,30 @@
           }
 
           ordersMap[key].items.push({
-            id: row["Штрихкод/BARCODE"] || "",
-            name: row["Действие"] + " " + row["Действие Дата"],
-            price: parseFloat(row["Оплата (руб.)"]) || 0,
+            id: barcode,
+            name: name,
+            price: price,
             qnt: 1,
-            category: row["Канал продажи"] || ""
+            category: category
           });
 
-          ordersMap[key].transaction_sum += parseFloat(row["Оплата (руб.)"]) || 0;
+          ordersMap[key].transaction_sum += price;
         });
 
         const result = Object.values(ordersMap);
-        document.getElementById('output').textContent = JSON.stringify(result, null, 2);
+        outputEl.textContent = JSON.stringify(result, null, 2);
+
+        // Кнопка для скачивания JSON
+        downloadBtn.style.display = "inline-block";
+        downloadBtn.onclick = () => {
+          const blob = new Blob([JSON.stringify(result, null, 2)], {type: "application/json"});
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = "orders.json";
+          a.click();
+          URL.revokeObjectURL(url);
+        };
       };
       reader.readAsArrayBuffer(file);
     }
