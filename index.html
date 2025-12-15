@@ -2,17 +2,16 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
-  <title>Excel to JSON Parser</title>
+  <title>Excel to JSON Parser - Optimized</title>
   <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
 </head>
 <body>
-  <h1>Парсер Excel в JSON</h1>
+  <h1>Парсер Excel в JSON (оптимизированный для больших файлов)</h1>
   <input type="file" id="fileInput" accept=".xlsx, .xls">
   <button id="downloadBtn" style="display:none;">Скачать JSON</button>
   <pre id="output"></pre>
 
   <script>
-    document.getElementById('fileInput').addEventListener('change', handleFile, false);
     const outputEl = document.getElementById('output');
     const downloadBtn = document.getElementById('downloadBtn');
 
@@ -40,9 +39,14 @@
       return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
     }
 
+    document.getElementById('fileInput').addEventListener('change', handleFile, false);
+
     function handleFile(e) {
       const file = e.target.files[0];
       if (!file) return;
+
+      outputEl.textContent = "Обрабатываем файл, это может занять несколько секунд...";
+      downloadBtn.style.display = "none";
 
       const reader = new FileReader();
       reader.onload = function(event) {
@@ -50,51 +54,53 @@
         const workbook = XLSX.read(data, { type: 'array' });
         const sheetName = workbook.SheetNames[0];
         const sheet = workbook.Sheets[sheetName];
-        const rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
 
-        if (!rows.length) {
-          outputEl.textContent = "Файл пустой или неправильно распознан";
-          return;
-        }
-
+        // Определяем заголовки и нормализуем ключи
+        const headerRow = XLSX.utils.sheet_to_json(sheet, { header: 1, range: 0, defval: "" })[0];
         const keyMap = {};
-        Object.keys(rows[0]).forEach(k => keyMap[normalizeKey(k)] = k);
+        headerRow.forEach((k, i) => keyMap[normalizeKey(k)] = i);
+
+        // Определяем индексы колонок
+        const emailCol = keyMap["email покупателя"];
+        const transactionCol = keyMap["номер заказа"];
+        const barcodeCol = keyMap["штрихкод/barcode"];
+        const categoryCol = keyMap["канал продажи"];
+        const paymentCol = keyMap["время создания билета"];
+        const priceCol = keyMap["оплата (руб.)"];
+        const actionCol = Object.keys(keyMap).find(k => k.includes("действие"));
+        const dateCol = Object.keys(keyMap).find(k => k.includes("дата") || k.includes("дата действия") || k.includes("действие дата"));
 
         const ordersMap = {};
 
-        rows.forEach(row => {
-          const email = row[keyMap["email покупателя"]] || "";
-          if (!email) return; // Пропускаем пустой email
+        // Преобразуем строки по частям
+        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, range: 1, defval: "" });
 
-          const transaction_id = row[keyMap["номер заказа"]] || "";
-          const barcode = row[keyMap["штрихкод/barcode"]] || "";
-          const category = row[keyMap["канал продажи"]] || "";
-          const payment_dt_raw = row[keyMap["время создания билета"]] || "";
-          const price_raw = row[keyMap["оплата (руб.)"]];
+        for (let r = 0; r < rows.length; r++) {
+          const row = rows[r];
 
-          // Преобразование цены
-          let price_val = price_raw !== undefined && price_raw !== null && price_raw !== "" 
-                          ? parseFloat(String(price_raw).replace(",", ".")) || 0 
-                          : 0;
+          const email = emailCol !== undefined ? row[emailCol] : "";
+          if (!email) continue;
+
+          const transaction_id = transactionCol !== undefined ? row[transactionCol] : "";
+          const barcode = barcodeCol !== undefined ? row[barcodeCol] : "";
+          const category = categoryCol !== undefined ? row[categoryCol] : "";
+          const payment_dt_raw = paymentCol !== undefined ? row[paymentCol] : "";
+          let price_val = priceCol !== undefined ? parseFloat(String(row[priceCol]).replace(",", ".")) || 0 : 0;
           if (isNaN(price_val)) price_val = 0;
 
           const payment_dt = formatDate(payment_dt_raw);
-          const transaction_dt = payment_dt; // дублируем payment_dt
+          const transaction_dt = payment_dt;
 
-          // Формируем name: действие + дата
-          const actionKey = Object.keys(row).find(k => normalizeKey(k).includes("действие"));
-          const dateKey = Object.keys(row).find(k => normalizeKey(k).includes("дата") || normalizeKey(k).includes("дата действия") || normalizeKey(k).includes("действие дата"));
-          const action = actionKey ? row[actionKey] : "";
-          let dateVal = dateKey ? row[dateKey] : "";
-
-          // Если дата хранится как число Excel
+          // Формируем name
+          let action = actionCol !== undefined ? row[keyMap[actionCol]] : "";
+          let dateVal = dateCol !== undefined ? row[keyMap[dateCol]] : "";
           if (typeof dateVal === "number") {
             const d = XLSX.SSF.parse_date_code(dateVal);
-            const pad = n => n.toString().padStart(2, '0');
+            const pad = n => n.toString().padStart(2,'0');
             dateVal = `${pad(d.d)}.${pad(d.m)}.${d.y}`;
           }
-
           const name = (action + " " + dateVal).trim();
+
           const price = price_val.toFixed(2);
 
           const key = transaction_id + "_" + email;
@@ -122,7 +128,7 @@
           });
 
           ordersMap[key].transaction_sum += price_val;
-        });
+        }
 
         const result = Object.values(ordersMap).map(order => ({
           ...order,
@@ -147,4 +153,5 @@
   </script>
 </body>
 </html>
+
 
