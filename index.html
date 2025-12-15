@@ -64,11 +64,10 @@
           const date = row[keyMap["дата действия"]] || row[keyMap["действие дата"]] || "";
           const category = row[keyMap["канал продажи"]] || "";
           const payment_dt_raw = row[keyMap["время создания билета"]] || "";
-          const transaction_dt_raw = row[keyMap["дата и время транзакции"]] || "";
           const price_val = parseFloat(row[keyMap["оплата (руб.)"]]) || 0;
 
           const payment_dt = formatDate(payment_dt_raw);
-          const transaction_dt = formatDate(transaction_dt_raw);
+          const transaction_dt = payment_dt; // дублируем payment_dt
 
           const name = (action + " " + date).trim();
           const price = price_val.toFixed(2);
@@ -125,3 +124,4 @@
   </script>
 </body>
 </html>
+
