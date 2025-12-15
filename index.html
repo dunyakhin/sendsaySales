@@ -2,102 +2,94 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
-  <title>Excel → Sendsay Order JSON</title>
+  <title>Excel → Sendsay ORDER</title>
   <style>
-    body { font-family: Arial, sans-serif; padding: 20px; }
-    pre { background: #f5f5f5; padding: 10px; border-radius: 5px; overflow: auto; }
-    .warning { color: orange; }
+    body { font-family: Arial; padding: 20px; }
+    pre { background: #f5f5f5; padding: 10px; max-height: 500px; overflow: auto; }
   </style>
 </head>
 <body>
-  <h1>Загрузите Excel файл</h1>
-  <input type="file" id="inputExcel" accept=".xlsx, .xls">
-  <h2>JSON для Sendsay (по заказам):</h2>
-  <pre id="output"></pre>
 
-  <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
-  <script>
-    const input = document.getElementById('inputExcel');
-    const output = document.getElementById('output');
+<h2>Загрузите Excel</h2>
+<input type="file" id="file" accept=".xlsx,.xls">
+<pre id="out"></pre>
 
-    input.addEventListener('change', function(e) {
-      const file = e.target.files[0];
-      if (!file) {
-        output.textContent = "Файл не выбран.";
-        return;
+<script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+<script>
+document.getElementById('file').addEventListener('change', e => {
+  const reader = new FileReader();
+  reader.onload = evt => {
+    const wb = XLSX.read(new Uint8Array(evt.target.result), { type: 'array' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+    const headers = rows.shift().map(h => h.toString().trim());
+
+    const col = name =>
+      headers.findIndex(h => h.replace(/\s+/g,'') === name.replace(/\s+/g,''));
+
+    const idx = {
+      pos: col("№ позиции"),
+      action: col("Действие"),
+      date: col("Дата"),
+      time: col("Время"),
+      price: col("Оплата  (руб.)"),
+      seatId: col("ID места/SEAT_ID"),
+      orderId: col("Номер Заказа"),
+      email: col("EMAIL Покупателя")
+    };
+
+    const orders = {};
+
+    rows.forEach(r => {
+      if (!r[idx.email] || !r[idx.orderId]) return;
+
+      if (!orders[r[idx.orderId]]) {
+        orders[r[idx.orderId]] = {
+          email: r[idx.email],
+          transaction_id: r[idx.orderId],
+          transaction_dt: formatDT(r[idx.date], r[idx.time]),
+          transaction_status: 1,
+          transaction_sum: 0,
+          items: []
+        };
       }
 
-      const reader = new FileReader();
-      reader.onload = function(e) {
-        try {
-          const data = new Uint8Array(e.target.result);
-          const workbook = XLSX.read(data, { type: 'array' });
-          const sheetName = workbook.SheetNames[0];
-          const worksheet = workbook.Sheets[sheetName];
-
-          const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "" });
-          if (rows.length < 2) {
-            output.textContent = "Нет данных!";
-            return;
-          }
-
-          // Читаем заголовки, убираем лишние пробелы и приводим к нижнему регистру
-          const headers = rows.shift().map(h => h.toString().trim().toLowerCase());
-
-          const findHeader = name => headers.findIndex(h => h === name.toLowerCase().trim());
-
-          const idx = {
-            email: findHeader("EMAIL Покупателя".toLowerCase()),
-            orderId: findHeader("Номер Заказа".toLowerCase()),
-            seat: findHeader("ID места/SEAT_ID".toLowerCase()),
-            barcode: findHeader("Штрихкод/BARCODE".toLowerCase()),
-            ticketNumber: findHeader("№ позиции".toLowerCase()),
-            price: findHeader("Оплата  (руб.)".toLowerCase()),
-            name: findHeader("Действие".toLowerCase()),
-            date: findHeader("Дата".toLowerCase()),
-            time: findHeader("Время".toLowerCase())
-          };
-
-          const orders = {};
-          rows.forEach(row => {
-            const ord = row[idx.orderId];
-            const email = row[idx.email];
-            if (!ord || !email) return;
-
-            if (!orders[ord]) {
-              orders[ord] = {
-                email: email,
-                transaction_id: ord.toString(),
-                transaction_status: 1,
-                transaction_dt: `${row[idx.date] || ""} ${row[idx.time] || ""}`,
-                transaction_sum: 0,
-                items: []
-              };
-            }
-
-            const ticketPrice = Number(row[idx.price] || 0);
-
-            orders[ord].items.push({
-              id: row[idx.seat] || row[idx.barcode] || "",
-              name: row[idx.name] || `Билет ${row[idx.ticketNumber] || ""}`,
-              price: ticketPrice,
-              qnt: 1
-            });
-
-            orders[ord].transaction_sum += ticketPrice;
-          });
-
-          const result = Object.values(orders);
-          output.textContent = JSON.stringify(result, null, 2);
-
-        } catch (err) {
-          output.textContent = "Ошибка:\n" + err.message;
-        }
-      };
-
-      reader.readAsArrayBuffer(file);
+      const price = Number(r[idx.price] || 0);
+      orders[r[idx.orderId]].items.push({
+        id: r[idx.seatId],
+        name: r[idx.action],
+        price: price,
+        qnt: 1
+      });
+      orders[r[idx.orderId]].transaction_sum += price;
     });
-  </script>
+
+    const ssec = Object.values(orders).map(o => ({
+      addr_type: "email",
+      addr: o.email,
+      event: "ORDER",
+      data: {
+        transaction_id: o.transaction_id,
+        transaction_dt: o.transaction_dt,
+        transaction_status: o.transaction_status,
+        transaction_sum: o.transaction_sum,
+        items: o.items
+      }
+    }));
+
+    document.getElementById('out').textContent =
+      JSON.stringify(ssec, null, 2);
+  };
+  reader.readAsArrayBuffer(e.target.files[0]);
+});
+
+function formatDT(d, t) {
+  if (!d) return "";
+  const [dd, mm, yyyy] = d.split(".");
+  return `${yyyy}-${mm}-${dd} ${t || "00:00"}:00`;
+}
+</script>
+
 </body>
 </html>
-
