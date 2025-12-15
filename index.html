@@ -1,88 +1,138 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-  <meta charset="UTF-8">
-  <title>Excel → Sendsay ORDER</title>
-  <style>
-    body { font-family: Arial; padding: 20px; }
-    pre { background: #f5f5f5; padding: 10px; max-height: 500px; overflow: auto; }
-  </style>
+<meta charset="UTF-8">
+<title>Excel → Sendsay ORDER</title>
+<style>
+  body { font-family: Arial; padding: 20px; }
+  pre { background:#f5f5f5; padding:10px; max-height:500px; overflow:auto; }
+  .log { color:#555; }
+  .error { color:red; }
+</style>
 </head>
 <body>
 
-<h2>Загрузите Excel</h2>
+<h2>Excel → Sendsay</h2>
+
 <input type="file" id="file" accept=".xlsx,.xls">
+<br><br>
+<button onclick="processFile()">Обработать файл</button>
+
+<h3>Лог</h3>
+<pre id="log" class="log"></pre>
+
+<h3>JSON</h3>
 <pre id="out"></pre>
 
 <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+
 <script>
-document.getElementById('file').addEventListener('change', e => {
+function log(msg) {
+  document.getElementById('log').textContent += msg + "\n";
+}
+
+function processFile() {
+  const input = document.getElementById('file');
+  const out = document.getElementById('out');
+  out.textContent = "";
+  document.getElementById('log').textContent = "";
+
+  if (!input.files.length) {
+    log("❌ Файл не выбран");
+    return;
+  }
+
+  if (typeof XLSX === "undefined") {
+    log("❌ XLSX не загрузился (CDN)");
+    return;
+  }
+
+  log("✅ Файл выбран");
+
   const reader = new FileReader();
-  reader.onload = evt => {
-    const wb = XLSX.read(new Uint8Array(evt.target.result), { type: 'array' });
-    const ws = wb.Sheets[wb.SheetNames[0]];
+  reader.onerror = () => log("❌ Ошибка FileReader");
 
-    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
-    const headers = rows.shift().map(h => h.toString().trim());
+  reader.onload = e => {
+    try {
+      log("📖 Чтение Excel");
 
-    const col = name =>
-      headers.findIndex(h => h.replace(/\s+/g,'') === name.replace(/\s+/g,''));
+      const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+      log("📄 Листов: " + wb.SheetNames.length);
 
-    const idx = {
-      pos: col("№ позиции"),
-      action: col("Действие"),
-      date: col("Дата"),
-      time: col("Время"),
-      price: col("Оплата  (руб.)"),
-      seatId: col("ID места/SEAT_ID"),
-      orderId: col("Номер Заказа"),
-      email: col("EMAIL Покупателя")
-    };
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
 
-    const orders = {};
+      log("📊 Строк: " + rows.length);
 
-    rows.forEach(r => {
-      if (!r[idx.email] || !r[idx.orderId]) return;
-
-      if (!orders[r[idx.orderId]]) {
-        orders[r[idx.orderId]] = {
-          email: r[idx.email],
-          transaction_id: r[idx.orderId],
-          transaction_dt: formatDT(r[idx.date], r[idx.time]),
-          transaction_status: 1,
-          transaction_sum: 0,
-          items: []
-        };
+      if (rows.length < 2) {
+        out.textContent = "❌ Нет данных";
+        return;
       }
 
-      const price = Number(r[idx.price] || 0);
-      orders[r[idx.orderId]].items.push({
-        id: r[idx.seatId],
-        name: r[idx.action],
-        price: price,
-        qnt: 1
+      const headers = rows.shift().map(h => h.toString().trim());
+      log("🧾 Заголовки: " + headers.join(" | "));
+
+      const col = name =>
+        headers.findIndex(h =>
+          h.replace(/\s+/g,'') === name.replace(/\s+/g,'')
+        );
+
+      const idx = {
+        email: col("EMAIL Покупателя"),
+        order: col("Номер Заказа"),
+        price: col("Оплата  (руб.)"),
+        seat: col("ID места/SEAT_ID"),
+        action: col("Действие"),
+        date: col("Дата"),
+        time: col("Время")
+      };
+
+      log("🔎 Индексы: " + JSON.stringify(idx));
+
+      const orders = {};
+
+      rows.forEach(r => {
+        if (!r[idx.email] || !r[idx.order]) return;
+
+        if (!orders[r[idx.order]]) {
+          orders[r[idx.order]] = {
+            email: r[idx.email],
+            transaction_id: r[idx.order],
+            transaction_dt: formatDT(r[idx.date], r[idx.time]),
+            transaction_status: 1,
+            transaction_sum: 0,
+            items: []
+          };
+        }
+
+        const price = Number(r[idx.price] || 0);
+        orders[r[idx.order]].items.push({
+          id: r[idx.seat],
+          name: r[idx.action],
+          price: price,
+          qnt: 1
+        });
+
+        orders[r[idx.order]].transaction_sum += price;
       });
-      orders[r[idx.orderId]].transaction_sum += price;
-    });
 
-    const ssec = Object.values(orders).map(o => ({
-      addr_type: "email",
-      addr: o.email,
-      event: "ORDER",
-      data: {
-        transaction_id: o.transaction_id,
-        transaction_dt: o.transaction_dt,
-        transaction_status: o.transaction_status,
-        transaction_sum: o.transaction_sum,
-        items: o.items
-      }
-    }));
+      const result = Object.values(orders).map(o => ({
+        addr_type: "email",
+        addr: o.email,
+        event: "ORDER",
+        data: o
+      }));
 
-    document.getElementById('out').textContent =
-      JSON.stringify(ssec, null, 2);
+      out.textContent = JSON.stringify(result, null, 2);
+      log("✅ Готово. Заказов: " + result.length);
+
+    } catch (err) {
+      log("❌ JS ошибка: " + err.message);
+    }
   };
-  reader.readAsArrayBuffer(e.target.files[0]);
-});
+
+  reader.readAsArrayBuffer(input.files[0]);
+}
 
 function formatDT(d, t) {
   if (!d) return "";
