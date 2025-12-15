@@ -24,7 +24,6 @@
       if (!date) return "";
       let d = new Date(date);
       if (isNaN(d)) {
-        // Попробуем распарсить как строку "08.11.2025 15:30"
         const parts = date.toString().match(/(\d{2})\.(\d{2})\.(\d{4})\s*(\d{2}):(\d{2})/);
         if (parts) {
           d = new Date(parts[3], parts[2]-1, parts[1], parts[4], parts[5]);
@@ -58,20 +57,24 @@
 
         rows.forEach(row => {
           const email = row[keyMap["email покупателя"]] || "";
-          if (!email) return; // Пропускаем строки с пустым email
+          if (!email) return; // Пропускаем пустой email
 
           const transaction_id = row[keyMap["номер заказа"]] || "";
           const barcode = row[keyMap["штрихкод/barcode"]] || "";
-          const action = row[keyMap["действие"]] || "";
-          const date = row[keyMap["дата действия"]] || row[keyMap["действие дата"]] || "";
           const category = row[keyMap["канал продажи"]] || "";
           const payment_dt_raw = row[keyMap["время создания билета"]] || "";
           const price_val = parseFloat(row[keyMap["оплата (руб.)"]]) || 0;
 
           const payment_dt = formatDate(payment_dt_raw);
-          const transaction_dt = payment_dt; // Дублируем payment_dt
+          const transaction_dt = payment_dt; // дублируем payment_dt
 
+          // Генерация name из двух колонок
+          const actionKey = keyMap["действие"];
+          const dateKey = keyMap["дата действия"] || keyMap["действие дата"];
+          const action = actionKey ? row[actionKey] : "";
+          const date = dateKey ? row[dateKey] : "";
           const name = (action + " " + date).trim();
+
           const price = price_val.toFixed(2);
 
           const key = transaction_id + "_" + email;
@@ -101,17 +104,13 @@
           ordersMap[key].transaction_sum += price_val;
         });
 
-        const result = Object.values(ordersMap).map(order => {
-          return {
-            ...order,
-            transaction_sum: order.transaction_sum.toFixed(2)
-          };
-        });
+        const result = Object.values(ordersMap).map(order => ({
+          ...order,
+          transaction_sum: order.transaction_sum.toFixed(2)
+        }));
 
-        // Показать результат
         outputEl.textContent = JSON.stringify(result, null, 2);
 
-        // Кнопка для скачивания JSON
         downloadBtn.style.display = "inline-block";
         downloadBtn.onclick = () => {
           const blob = new Blob([JSON.stringify(result, null, 2)], {type: "application/json"});
@@ -128,4 +127,3 @@
   </script>
 </body>
 </html>
-
