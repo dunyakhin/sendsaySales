@@ -2,23 +2,23 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<title>Excel → Sendsay ORDER</title>
+<title>Excel → Sendsay ORDER (SSEC)</title>
 <style>
-  body { font-family: Arial; padding: 20px; }
-  button { padding: 6px 12px; }
+  body { font-family: Arial, sans-serif; padding: 20px; }
+  button { padding: 6px 14px; }
   pre {
     background: #f5f5f5;
     padding: 10px;
-    max-height: 400px;
+    max-height: 420px;
     overflow: auto;
+    white-space: pre-wrap;
   }
   .log { color:#555; }
-  .error { color:red; }
 </style>
 </head>
 <body>
 
-<h2>Excel → Sendsay (ORDER)</h2>
+<h2>Excel → Sendsay (ORDER / SSEC)</h2>
 
 <input type="file" id="file" accept=".xlsx,.xls">
 <br><br>
@@ -39,8 +39,10 @@ function log(msg) {
 
 function processFile() {
   const input = document.getElementById('file');
+  const logEl = document.getElementById('log');
   const out = document.getElementById('out');
-  document.getElementById('log').textContent = "";
+
+  logEl.textContent = "";
   out.textContent = "";
 
   if (!input.files.length) {
@@ -49,7 +51,7 @@ function processFile() {
   }
 
   if (typeof XLSX === "undefined") {
-    log("❌ XLSX не загрузился");
+    log("❌ SheetJS не загрузился");
     return;
   }
 
@@ -70,7 +72,7 @@ function processFile() {
         return;
       }
 
-      // Заголовки
+      // === ЗАГОЛОВКИ ===
       const headers = rows.shift().map(h => h.toString().trim());
       log("🧾 Заголовки: " + headers.join(" | "));
 
@@ -92,6 +94,7 @@ function processFile() {
 
       log("🔎 Индексы: " + JSON.stringify(idx));
 
+      // === ГРУППИРОВКА ЗАКАЗОВ ===
       const orders = {};
 
       rows.forEach((r, i) => {
@@ -99,12 +102,12 @@ function processFile() {
 
         if (!orders[r[idx.order]]) {
           orders[r[idx.order]] = {
-            email: r[idx.email],
-            transaction_id: r[idx.order],
+            transaction_id: String(r[idx.order]),
             transaction_dt: formatDT(r[idx.date], r[idx.time]),
             transaction_status: 1,
             transaction_sum: 0,
-            items: []
+            items: [],
+            email: r[idx.email]
           };
         }
 
@@ -120,11 +123,18 @@ function processFile() {
         orders[r[idx.order]].transaction_sum += price;
       });
 
+      // === SSEC СОБЫТИЯ ===
       const result = Object.values(orders).map(o => ({
         addr_type: "email",
         addr: o.email,
-        event: "ORDER",
-        data: o
+        event_type: "ORDER",
+        data: {
+          transaction_id: o.transaction_id,
+          transaction_dt: o.transaction_dt,
+          transaction_status: o.transaction_status,
+          transaction_sum: o.transaction_sum,
+          items: o.items
+        }
       }));
 
       out.textContent = JSON.stringify(result, null, 2);
@@ -138,7 +148,7 @@ function processFile() {
   reader.readAsArrayBuffer(input.files[0]);
 }
 
-// Универсальная обработка Excel-даты
+// === ОБРАБОТКА EXCEL-ДАТ ===
 function formatDT(d, t) {
   if (!d) return "";
 
@@ -147,13 +157,13 @@ function formatDT(d, t) {
   if (d instanceof Date) {
     dateObj = d;
   } else if (typeof d === "number") {
-    const parsed = XLSX.SSF.parse_date_code(d);
-    if (!parsed) return "";
-    dateObj = new Date(parsed.y, parsed.m - 1, parsed.d);
+    const p = XLSX.SSF.parse_date_code(d);
+    if (!p) return "";
+    dateObj = new Date(p.y, p.m - 1, p.d);
   } else if (typeof d === "string") {
-    const p = d.split(".");
-    if (p.length !== 3) return "";
-    dateObj = new Date(p[2], p[1] - 1, p[0]);
+    const parts = d.split(".");
+    if (parts.length !== 3) return "";
+    dateObj = new Date(parts[2], parts[1] - 1, parts[0]);
   } else {
     return "";
   }
@@ -169,4 +179,3 @@ function formatDT(d, t) {
 
 </body>
 </html>
-
