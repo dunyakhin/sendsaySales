@@ -1,169 +1,65 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-<meta charset="UTF-8">
-<title>Excel → Sendsay SSEC</title>
-<style>
-  body { font-family: Arial, sans-serif; padding: 20px; }
-  button { padding: 6px 14px; }
-  pre {
-    background: #f5f5f5;
-    padding: 10px;
-    max-height: 420px;
-    overflow: auto;
-    white-space: pre-wrap;
-  }
-  .log { color:#555; }
-</style>
+  <meta charset="UTF-8">
+  <title>Excel to JSON Parser</title>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
 </head>
 <body>
+  <h1>Парсер Excel в JSON</h1>
+  <input type="file" id="fileInput" accept=".xlsx, .xls">
+  <pre id="output"></pre>
 
-<h2>Excel → Sendsay (SSEC)</h2>
+  <script>
+    document.getElementById('fileInput').addEventListener('change', handleFile, false);
 
-<input type="file" id="file" accept=".xlsx,.xls">
-<br><br>
-<button onclick="processFile()">Обработать файл</button>
+    function handleFile(e) {
+      const file = e.target.files[0];
+      if (!file) return;
 
-<h3>Лог</h3>
-<pre id="log" class="log"></pre>
+      const reader = new FileReader();
+      reader.onload = function(event) {
+        const data = new Uint8Array(event.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const sheetName = workbook.SheetNames[0];
+        const sheet = workbook.Sheets[sheetName];
+        const rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
 
-<h3>JSON для Sendsay</h3>
-<pre id="out"></pre>
+        const ordersMap = {};
 
-<script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+        rows.forEach(row => {
+          const key = row["Номер Заказа"] + "_" + row["EMAIL Покупателя"];
+          if (!ordersMap[key]) {
+            ordersMap[key] = {
+              email: row["EMAIL Покупателя"] || "",
+              addr_type: "email",
+              transaction_id: row["Номер Заказа"] || "",
+              transaction_status: 1,
+              transaction_dt: row["Дата и время транзакции"] || "",
+              transaction_sum: 0,
+              payment_dt: row["Время создания билета"] || "",
+              event_type: 1,
+              update: 0,
+              items: []
+            };
+          }
 
-<script>
-function log(msg) {
-  document.getElementById('log').textContent += msg + "\n";
-}
+          ordersMap[key].items.push({
+            id: row["Штрихкод/BARCODE"] || "",
+            name: row["Действие"] + " " + row["Действие Дата"],
+            price: parseFloat(row["Оплата (руб.)"]) || 0,
+            qnt: 1,
+            category: row["Канал продажи"] || ""
+          });
 
-function processFile() {
-  const input = document.getElementById('file');
-  const out = document.getElementById('out');
-  const logEl = document.getElementById('log');
-
-  logEl.textContent = "";
-  out.textContent = "";
-
-  if (!input.files.length) {
-    log("❌ Файл не выбран");
-    return;
-  }
-
-  const reader = new FileReader();
-  reader.onload = e => {
-    try {
-      const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
-
-      log("📊 Строк всего: " + rows.length);
-      if (rows.length < 2) return;
-
-      const headers = rows.shift().map(h => h.toString().trim());
-      log("🧾 Заголовки: " + headers.join(" | "));
-
-      const col = name =>
-        headers.findIndex(h =>
-          h.replace(/\s+/g,'').toLowerCase() ===
-          name.replace(/\s+/g,'').toLowerCase()
-        );
-
-      const idx = {
-        email: col("EMAIL Покупателя"),
-        order: col("Номер Заказа"),
-        price: col("Оплата  (руб.)"),
-        seat: col("ID места/SEAT_ID"),
-        action: col("Действие"),
-        date: col("Дата"),
-        time: col("Время")
-      };
-
-      log("🔎 Индексы: " + JSON.stringify(idx));
-
-      const orders = {};
-
-      rows.forEach((r, i) => {
-        const email = r[idx.email];
-        const orderId = r[idx.order];
-        if (!email || !orderId) return;
-
-        if (!orders[orderId]) {
-          orders[orderId] = {
-            email: email,
-            transaction_id: String(orderId),
-            transaction_dt: formatDT(r[idx.date], r[idx.time]),
-            transaction_status: 1,
-            transaction_sum: 0,
-            items: []
-          };
-        }
-
-        const price = Number(r[idx.price] || 0);
-
-        orders[orderId].items.push({
-          id: r[idx.seat] || `ticket_${i+1}`,
-          name: r[idx.action] || "Билет",
-          price: price,
-          qnt: 1
+          ordersMap[key].transaction_sum += parseFloat(row["Оплата (руб.)"]) || 0;
         });
 
-        orders[orderId].transaction_sum += price;
-      });
-
-      // === SSEC формат с event_type = 5 ===
-      const result = Object.values(orders).map(o => ({
-        addr_type: "email",
-        addr: o.email,
-        event_type: 5,
-        data: {
-          transaction_id: o.transaction_id,
-          transaction_dt: o.transaction_dt,
-          transaction_status: o.transaction_status,
-          transaction_sum: o.transaction_sum,
-          items: o.items
-        }
-      }));
-
-      out.textContent = JSON.stringify(result, null, 2);
-      log("✅ Готово. Заказов: " + result.length);
-
-    } catch (err) {
-      log("❌ JS ошибка: " + err.message);
+        const result = Object.values(ordersMap);
+        document.getElementById('output').textContent = JSON.stringify(result, null, 2);
+      };
+      reader.readAsArrayBuffer(file);
     }
-  };
-
-  reader.readAsArrayBuffer(input.files[0]);
-}
-
-// === Excel-дата → строка ===
-function formatDT(d, t) {
-  if (!d) return "";
-
-  let dateObj;
-
-  if (d instanceof Date) {
-    dateObj = d;
-  } else if (typeof d === "number") {
-    const p = XLSX.SSF.parse_date_code(d);
-    if (!p) return "";
-    dateObj = new Date(p.y, p.m - 1, p.d);
-  } else if (typeof d === "string") {
-    const parts = d.split(".");
-    if (parts.length !== 3) return "";
-    dateObj = new Date(parts[2], parts[1] - 1, parts[0]);
-  } else {
-    return "";
-  }
-
-  const yyyy = dateObj.getFullYear();
-  const mm = String(dateObj.getMonth() + 1).padStart(2, "0");
-  const dd = String(dateObj.getDate()).padStart(2, "0");
-  const time = (typeof t === "string" && t.includes(":")) ? t : "00:00";
-
-  return `${yyyy}-${mm}-${dd} ${time}:00`;
-}
-</script>
-
+  </script>
 </body>
 </html>
