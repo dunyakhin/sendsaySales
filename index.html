@@ -58,6 +58,8 @@
 
         rows.forEach(row => {
           const email = row[keyMap["email покупателя"]] || "";
+          if (!email) return; // Пропускаем строки с пустым email
+
           const transaction_id = row[keyMap["номер заказа"]] || "";
           const barcode = row[keyMap["штрихкод/barcode"]] || "";
           const action = row[keyMap["действие"]] || "";
@@ -67,7 +69,7 @@
           const price_val = parseFloat(row[keyMap["оплата (руб.)"]]) || 0;
 
           const payment_dt = formatDate(payment_dt_raw);
-          const transaction_dt = payment_dt; // дублируем payment_dt
+          const transaction_dt = payment_dt; // Дублируем payment_dt
 
           const name = (action + " " + date).trim();
           const price = price_val.toFixed(2);
@@ -106,8 +108,10 @@
           };
         });
 
+        // Показать результат
         outputEl.textContent = JSON.stringify(result, null, 2);
 
+        // Кнопка для скачивания JSON
         downloadBtn.style.display = "inline-block";
         downloadBtn.onclick = () => {
           const blob = new Blob([JSON.stringify(result, null, 2)], {type: "application/json"});
