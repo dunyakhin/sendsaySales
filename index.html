@@ -2,15 +2,20 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
-  <title>Excel to JSON Parser (Large Files)</title>
+  <title>Excel → JSON Parser (Large Files Safe)</title>
   <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 20px; }
+    pre { max-height: 400px; overflow: auto; background: #f5f5f5; padding: 10px; }
+  </style>
 </head>
 <body>
-  <h1>Парсер Excel → JSON (большие файлы)</h1>
 
-  <input type="file" id="fileInput" accept=".xlsx,.xls">
-  <button id="downloadBtn" style="display:none;">Скачать JSON</button>
-  <pre id="output"></pre>
+<h2>Парсер Excel → JSON</h2>
+<input type="file" id="fileInput" accept=".xlsx,.xls">
+<button id="downloadBtn" style="display:none;">Скачать JSON</button>
+
+<pre id="output"></pre>
 
 <script>
 const outputEl = document.getElementById("output");
@@ -18,26 +23,47 @@ const downloadBtn = document.getElementById("downloadBtn");
 
 document.getElementById("fileInput").addEventListener("change", handleFile);
 
+/* ================= HELPERS ================= */
+
 function normalizeKey(key) {
   return key.replace(/\s+/g, " ").trim().toLowerCase();
 }
 
-function formatDate(date) {
-  if (!date && date !== 0) return "";
-
-  // Excel serial date
-  if (typeof date === "number") {
-    const d = XLSX.SSF.parse_date_code(date);
-    const pad = n => String(n).padStart(2, "0");
-    return `${d.y}-${pad(d.m)}-${pad(d.d)} ${pad(d.H)}:${pad(d.M)}:${pad(d.S)}`;
-  }
-
-  const d = new Date(date);
-  if (isNaN(d)) return "";
+function formatDate(value) {
+  if (value === null || value === undefined || value === "") return "";
 
   const pad = n => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+
+  // Excel serial date
+  if (typeof value === "number") {
+    const d = XLSX.SSF.parse_date_code(value);
+    return `${d.y}-${pad(d.m)}-${pad(d.d)} ${pad(d.H || 0)}:${pad(d.M || 0)}:${pad(d.S || 0)}`;
+  }
+
+  const str = String(value).trim();
+
+  // DD.MM.YYYY HH:mm:ss
+  let m = str.match(/^(\d{2})\.(\d{2})\.(\d{4}) (\d{2}):(\d{2}):(\d{2})$/);
+  if (m) return `${m[3]}-${m[2]}-${m[1]} ${m[4]}:${m[5]}:${m[6]}`;
+
+  // DD.MM.YYYY HH:mm
+  m = str.match(/^(\d{2})\.(\d{2})\.(\d{4}) (\d{2}):(\d{2})$/);
+  if (m) return `${m[3]}-${m[2]}-${m[1]} ${m[4]}:${m[5]}:00`;
+
+  // DD.MM.YYYY
+  m = str.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+  if (m) return `${m[3]}-${m[2]}-${m[1]} 00:00:00`;
+
+  // ISO / fallback
+  const d = new Date(str);
+  if (!isNaN(d)) {
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  }
+
+  return "";
 }
+
+/* ================= MAIN ================= */
 
 function handleFile(e) {
   const file = e.target.files[0];
@@ -48,8 +74,8 @@ function handleFile(e) {
 
   const reader = new FileReader();
   reader.onload = function(ev) {
-    const data = new Uint8Array(ev.target.result);
-    const workbook = XLSX.read(data, { type: "array" });
+
+    const workbook = XLSX.read(new Uint8Array(ev.target.result), { type: "array" });
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
 
     // Заголовки
@@ -58,44 +84,45 @@ function handleFile(e) {
     header.forEach((h, i) => keyMap[normalizeKey(h)] = i);
 
     // Индексы колонок
-    const emailCol = keyMap["email покупателя"];
-    const orderCol = keyMap["номер заказа"];
-    const barcodeCol = keyMap["штрихкод/barcode"];
-    const priceCol = keyMap["оплата (руб.)"];
-    const channelCol = keyMap["канал продажи"];
-    const paymentCol = keyMap["время создания билета"];
-
-    const actionKey = Object.keys(keyMap).find(k => k.includes("действие"));
-    const dateKey = Object.keys(keyMap).find(k => k.includes("дата"));
+    const col = {
+      email: keyMap["email покупателя"],
+      order: keyMap["номер заказа"],
+      barcode: keyMap["штрихкод/barcode"],
+      price: keyMap["оплата (руб.)"],
+      channel: keyMap["канал продажи"],
+      payment: keyMap["время создания билета"],
+      action: Object.keys(keyMap).find(k => k.includes("действие")),
+      date: Object.keys(keyMap).find(k => k.includes("дата"))
+    };
 
     const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, range: 1, defval: "" });
-
     const orders = {};
 
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
 
-      // ===== EMAIL (жёсткая проверка) =====
-      let email = emailCol !== undefined ? String(row[emailCol]).trim() : "";
-      if (!email) continue; // ❗ полностью исключаем
+      // EMAIL (строго)
+      const email = col.email !== undefined ? String(row[col.email]).trim() : "";
+      if (!email) continue;
 
-      const orderId = orderCol !== undefined ? row[orderCol] : "";
-      const barcode = barcodeCol !== undefined ? row[barcodeCol] : "";
-      const category = channelCol !== undefined ? row[channelCol] : "";
+      const orderId = col.order !== undefined ? row[col.order] : "";
+      const barcode = col.barcode !== undefined ? row[col.barcode] : "";
+      const category = col.channel !== undefined ? row[col.channel] : "";
 
-      // Цена
-      let priceVal = priceCol !== undefined
-        ? parseFloat(String(row[priceCol]).replace(",", "."))
+      // PRICE
+      let priceVal = col.price !== undefined
+        ? parseFloat(String(row[col.price]).replace(",", "."))
         : 0;
       if (isNaN(priceVal)) priceVal = 0;
 
-      // Дата
-      const paymentDt = formatDate(paymentCol !== undefined ? row[paymentCol] : "");
+      // DATE
+      const paymentDt = formatDate(col.payment !== undefined ? row[col.payment] : "");
+      if (!paymentDt) continue; // защита
       const transactionDt = paymentDt;
 
-      // NAME = действие + дата
-      let action = actionKey ? row[keyMap[actionKey]] : "";
-      let dateVal = dateKey ? row[keyMap[dateKey]] : "";
+      // NAME
+      let action = col.action ? row[keyMap[col.action]] : "";
+      let dateVal = col.date ? row[keyMap[col.date]] : "";
 
       if (typeof dateVal === "number") {
         const d = XLSX.SSF.parse_date_code(dateVal);
@@ -109,7 +136,7 @@ function handleFile(e) {
 
       if (!orders[key]) {
         orders[key] = {
-          email: email,
+          email,
           addr_type: "email",
           transaction_id: orderId,
           transaction_status: 1,
@@ -124,10 +151,10 @@ function handleFile(e) {
 
       orders[key].items.push({
         id: barcode,
-        name: name,
+        name,
         price: priceVal.toFixed(2),
         qnt: 1,
-        category: category
+        category
       });
 
       orders[key].transaction_sum += priceVal;
