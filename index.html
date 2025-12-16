@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
-  <title>Excel → JSON Parser (Large Files Safe)</title>
+  <title>Excel → JSON Parser</title>
   <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
   <style>
     body { font-family: Arial, sans-serif; padding: 20px; }
@@ -13,7 +13,10 @@
 <body>
 
 <h2>Парсер Excel → JSON</h2>
-<input type="_ATTACHMENT="file" id="fileInput" accept=".xlsx,.xls">
+
+<!-- ВОТ ЗДЕСЬ выбираешь файл -->
+<input type="file" id="fileInput" accept=".xlsx,.xls">
+
 <button id="downloadBtn" style="display:none;">Скачать JSON</button>
 
 <div id="stats"></div>
@@ -25,8 +28,6 @@ const downloadBtn = document.getElementById("downloadBtn");
 const statsEl = document.getElementById("stats");
 
 document.getElementById("fileInput").addEventListener("change", handleFile);
-
-/* ================= HELPERS ================= */
 
 function normalizeKey(key) {
   return key.replace(/\s+/g, " ").trim().toLowerCase();
@@ -61,8 +62,6 @@ function formatDate(value) {
   return "";
 }
 
-/* ================= MAIN ================= */
-
 function handleFile(e) {
   const file = e.target.files[0];
   if (!file) return;
@@ -73,7 +72,6 @@ function handleFile(e) {
 
   const reader = new FileReader();
   reader.onload = function(ev) {
-
     const workbook = XLSX.read(new Uint8Array(ev.target.result), { type: "array" });
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
 
@@ -93,7 +91,6 @@ function handleFile(e) {
     };
 
     const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, range: 1, defval: "" });
-
     const orders = {};
     let skippedNoEmail = 0;
 
@@ -161,11 +158,10 @@ function handleFile(e) {
       transaction_sum: o.transaction_sum.toFixed(2)
     }));
 
-    // ===== СТАТИСТИКА =====
     statsEl.textContent =
-      `📊 Всего строк в Excel: ${rows.length} | ` +
-      `🧾 Заказов сформировано: ${result.length} | ` +
-      `🚫 Пропущено без email: ${skippedNoEmail}`;
+      `📊 Строк в Excel: ${rows.length} | ` +
+      `🧾 Заказов: ${result.length} | ` +
+      `🚫 Без email: ${skippedNoEmail}`;
 
     outputEl.textContent = JSON.stringify(result, null, 2);
 
