@@ -2,156 +2,158 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
-  <title>Excel to JSON Parser - Optimized</title>
+  <title>Excel to JSON Parser (Large Files)</title>
   <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
 </head>
 <body>
-  <h1>Парсер Excel в JSON (оптимизированный для больших файлов)</h1>
-  <input type="file" id="fileInput" accept=".xlsx, .xls">
+  <h1>Парсер Excel → JSON (большие файлы)</h1>
+
+  <input type="file" id="fileInput" accept=".xlsx,.xls">
   <button id="downloadBtn" style="display:none;">Скачать JSON</button>
   <pre id="output"></pre>
 
-  <script>
-    const outputEl = document.getElementById('output');
-    const downloadBtn = document.getElementById('downloadBtn');
+<script>
+const outputEl = document.getElementById("output");
+const downloadBtn = document.getElementById("downloadBtn");
 
-    function normalizeKey(key) {
-      return key.replace(/\s+/g, ' ').trim().toLowerCase();
-    }
+document.getElementById("fileInput").addEventListener("change", handleFile);
 
-    function formatDate(date) {
-      if (!date && date !== 0) return "";
+function normalizeKey(key) {
+  return key.replace(/\s+/g, " ").trim().toLowerCase();
+}
 
-      if (typeof date === "number") {
-        const d = XLSX.SSF.parse_date_code(date);
-        const pad = n => n.toString().padStart(2,'0');
-        return `${d.y}-${pad(d.m)}-${pad(d.d)} ${pad(d.H)}:${pad(d.M)}:${pad(d.S)}`;
+function formatDate(date) {
+  if (!date && date !== 0) return "";
+
+  // Excel serial date
+  if (typeof date === "number") {
+    const d = XLSX.SSF.parse_date_code(date);
+    const pad = n => String(n).padStart(2, "0");
+    return `${d.y}-${pad(d.m)}-${pad(d.d)} ${pad(d.H)}:${pad(d.M)}:${pad(d.S)}`;
+  }
+
+  const d = new Date(date);
+  if (isNaN(d)) return "";
+
+  const pad = n => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+function handleFile(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  outputEl.textContent = "⏳ Обработка файла...";
+  downloadBtn.style.display = "none";
+
+  const reader = new FileReader();
+  reader.onload = function(ev) {
+    const data = new Uint8Array(ev.target.result);
+    const workbook = XLSX.read(data, { type: "array" });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+
+    // Заголовки
+    const header = XLSX.utils.sheet_to_json(sheet, { header: 1, range: 0 })[0];
+    const keyMap = {};
+    header.forEach((h, i) => keyMap[normalizeKey(h)] = i);
+
+    // Индексы колонок
+    const emailCol = keyMap["email покупателя"];
+    const orderCol = keyMap["номер заказа"];
+    const barcodeCol = keyMap["штрихкод/barcode"];
+    const priceCol = keyMap["оплата (руб.)"];
+    const channelCol = keyMap["канал продажи"];
+    const paymentCol = keyMap["время создания билета"];
+
+    const actionKey = Object.keys(keyMap).find(k => k.includes("действие"));
+    const dateKey = Object.keys(keyMap).find(k => k.includes("дата"));
+
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, range: 1, defval: "" });
+
+    const orders = {};
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+
+      // ===== EMAIL (жёсткая проверка) =====
+      let email = emailCol !== undefined ? String(row[emailCol]).trim() : "";
+      if (!email) continue; // ❗ полностью исключаем
+
+      const orderId = orderCol !== undefined ? row[orderCol] : "";
+      const barcode = barcodeCol !== undefined ? row[barcodeCol] : "";
+      const category = channelCol !== undefined ? row[channelCol] : "";
+
+      // Цена
+      let priceVal = priceCol !== undefined
+        ? parseFloat(String(row[priceCol]).replace(",", "."))
+        : 0;
+      if (isNaN(priceVal)) priceVal = 0;
+
+      // Дата
+      const paymentDt = formatDate(paymentCol !== undefined ? row[paymentCol] : "");
+      const transactionDt = paymentDt;
+
+      // NAME = действие + дата
+      let action = actionKey ? row[keyMap[actionKey]] : "";
+      let dateVal = dateKey ? row[keyMap[dateKey]] : "";
+
+      if (typeof dateVal === "number") {
+        const d = XLSX.SSF.parse_date_code(dateVal);
+        const pad = n => String(n).padStart(2, "0");
+        dateVal = `${pad(d.d)}.${pad(d.m)}.${d.y}`;
       }
 
-      let d = new Date(date);
-      if (isNaN(d)) {
-        const parts = date.toString().match(/(\d{2})\.(\d{2})\.(\d{4})\s*(\d{2}):(\d{2})/);
-        if (parts) {
-          d = new Date(parts[3], parts[2]-1, parts[1], parts[4], parts[5]);
-        } else return "";
-      }
-      const pad = n => n.toString().padStart(2,'0');
-      return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-    }
+      const name = `${action} ${dateVal}`.trim();
 
-    document.getElementById('fileInput').addEventListener('change', handleFile, false);
+      const key = `${orderId}_${email}`;
 
-    function handleFile(e) {
-      const file = e.target.files[0];
-      if (!file) return;
-
-      outputEl.textContent = "Обрабатываем файл, это может занять несколько секунд...";
-      downloadBtn.style.display = "none";
-
-      const reader = new FileReader();
-      reader.onload = function(event) {
-        const data = new Uint8Array(event.target.result);
-        const workbook = XLSX.read(data, { type: 'array' });
-        const sheetName = workbook.SheetNames[0];
-        const sheet = workbook.Sheets[sheetName];
-
-        // Определяем заголовки и нормализуем ключи
-        const headerRow = XLSX.utils.sheet_to_json(sheet, { header: 1, range: 0, defval: "" })[0];
-        const keyMap = {};
-        headerRow.forEach((k, i) => keyMap[normalizeKey(k)] = i);
-
-        // Определяем индексы колонок
-        const emailCol = keyMap["email покупателя"];
-        const transactionCol = keyMap["номер заказа"];
-        const barcodeCol = keyMap["штрихкод/barcode"];
-        const categoryCol = keyMap["канал продажи"];
-        const paymentCol = keyMap["время создания билета"];
-        const priceCol = keyMap["оплата (руб.)"];
-        const actionCol = Object.keys(keyMap).find(k => k.includes("действие"));
-        const dateCol = Object.keys(keyMap).find(k => k.includes("дата") || k.includes("дата действия") || k.includes("действие дата"));
-
-        const ordersMap = {};
-
-        // Преобразуем строки по частям
-        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, range: 1, defval: "" });
-
-        for (let r = 0; r < rows.length; r++) {
-          const row = rows[r];
-
-          const email = emailCol !== undefined ? row[emailCol] : "";
-          if (!email) continue;
-
-          const transaction_id = transactionCol !== undefined ? row[transactionCol] : "";
-          const barcode = barcodeCol !== undefined ? row[barcodeCol] : "";
-          const category = categoryCol !== undefined ? row[categoryCol] : "";
-          const payment_dt_raw = paymentCol !== undefined ? row[paymentCol] : "";
-          let price_val = priceCol !== undefined ? parseFloat(String(row[priceCol]).replace(",", ".")) || 0 : 0;
-          if (isNaN(price_val)) price_val = 0;
-
-          const payment_dt = formatDate(payment_dt_raw);
-          const transaction_dt = payment_dt;
-
-          // Формируем name
-          let action = actionCol !== undefined ? row[keyMap[actionCol]] : "";
-          let dateVal = dateCol !== undefined ? row[keyMap[dateCol]] : "";
-          if (typeof dateVal === "number") {
-            const d = XLSX.SSF.parse_date_code(dateVal);
-            const pad = n => n.toString().padStart(2,'0');
-            dateVal = `${pad(d.d)}.${pad(d.m)}.${d.y}`;
-          }
-          const name = (action + " " + dateVal).trim();
-
-          const price = price_val.toFixed(2);
-
-          const key = transaction_id + "_" + email;
-          if (!ordersMap[key]) {
-            ordersMap[key] = {
-              email: email,
-              addr_type: "email",
-              transaction_id: transaction_id,
-              transaction_status: 1,
-              transaction_dt: transaction_dt,
-              transaction_sum: 0,
-              payment_dt: payment_dt,
-              event_type: 1,
-              update: 0,
-              items: []
-            };
-          }
-
-          ordersMap[key].items.push({
-            id: barcode,
-            name: name,
-            price: price,
-            qnt: 1,
-            category: category
-          });
-
-          ordersMap[key].transaction_sum += price_val;
-        }
-
-        const result = Object.values(ordersMap).map(order => ({
-          ...order,
-          transaction_sum: order.transaction_sum.toFixed(2)
-        }));
-
-        outputEl.textContent = JSON.stringify(result, null, 2);
-
-        downloadBtn.style.display = "inline-block";
-        downloadBtn.onclick = () => {
-          const blob = new Blob([JSON.stringify(result, null, 2)], { type: "application/json" });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          a.href = url;
-          a.download = "orders.json";
-          a.click();
-          URL.revokeObjectURL(url);
+      if (!orders[key]) {
+        orders[key] = {
+          email: email,
+          addr_type: "email",
+          transaction_id: orderId,
+          transaction_status: 1,
+          transaction_dt: transactionDt,
+          transaction_sum: 0,
+          payment_dt: paymentDt,
+          event_type: 1,
+          update: 0,
+          items: []
         };
-      };
-      reader.readAsArrayBuffer(file);
+      }
+
+      orders[key].items.push({
+        id: barcode,
+        name: name,
+        price: priceVal.toFixed(2),
+        qnt: 1,
+        category: category
+      });
+
+      orders[key].transaction_sum += priceVal;
     }
-  </script>
+
+    const result = Object.values(orders).map(o => ({
+      ...o,
+      transaction_sum: o.transaction_sum.toFixed(2)
+    }));
+
+    outputEl.textContent = JSON.stringify(result, null, 2);
+
+    downloadBtn.style.display = "inline-block";
+    downloadBtn.onclick = () => {
+      const blob = new Blob([JSON.stringify(result, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "orders.json";
+      a.click();
+      URL.revokeObjectURL(url);
+    };
+  };
+
+  reader.readAsArrayBuffer(file);
+}
+</script>
 </body>
 </html>
-
-
