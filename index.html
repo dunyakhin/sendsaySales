@@ -7,19 +7,22 @@
   <style>
     body { font-family: Arial, sans-serif; padding: 20px; }
     pre { max-height: 400px; overflow: auto; background: #f5f5f5; padding: 10px; }
+    #stats { margin: 10px 0; font-weight: bold; }
   </style>
 </head>
 <body>
 
 <h2>Парсер Excel → JSON</h2>
-<input type="file" id="fileInput" accept=".xlsx,.xls">
+<input type="_ATTACHMENT="file" id="fileInput" accept=".xlsx,.xls">
 <button id="downloadBtn" style="display:none;">Скачать JSON</button>
 
+<div id="stats"></div>
 <pre id="output"></pre>
 
 <script>
 const outputEl = document.getElementById("output");
 const downloadBtn = document.getElementById("downloadBtn");
+const statsEl = document.getElementById("stats");
 
 document.getElementById("fileInput").addEventListener("change", handleFile);
 
@@ -34,7 +37,6 @@ function formatDate(value) {
 
   const pad = n => String(n).padStart(2, "0");
 
-  // Excel serial date
   if (typeof value === "number") {
     const d = XLSX.SSF.parse_date_code(value);
     return `${d.y}-${pad(d.m)}-${pad(d.d)} ${pad(d.H || 0)}:${pad(d.M || 0)}:${pad(d.S || 0)}`;
@@ -42,19 +44,15 @@ function formatDate(value) {
 
   const str = String(value).trim();
 
-  // DD.MM.YYYY HH:mm:ss
   let m = str.match(/^(\d{2})\.(\d{2})\.(\d{4}) (\d{2}):(\d{2}):(\d{2})$/);
   if (m) return `${m[3]}-${m[2]}-${m[1]} ${m[4]}:${m[5]}:${m[6]}`;
 
-  // DD.MM.YYYY HH:mm
   m = str.match(/^(\d{2})\.(\d{2})\.(\d{4}) (\d{2}):(\d{2})$/);
   if (m) return `${m[3]}-${m[2]}-${m[1]} ${m[4]}:${m[5]}:00`;
 
-  // DD.MM.YYYY
   m = str.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
   if (m) return `${m[3]}-${m[2]}-${m[1]} 00:00:00`;
 
-  // ISO / fallback
   const d = new Date(str);
   if (!isNaN(d)) {
     return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
@@ -70,6 +68,7 @@ function handleFile(e) {
   if (!file) return;
 
   outputEl.textContent = "⏳ Обработка файла...";
+  statsEl.textContent = "";
   downloadBtn.style.display = "none";
 
   const reader = new FileReader();
@@ -78,12 +77,10 @@ function handleFile(e) {
     const workbook = XLSX.read(new Uint8Array(ev.target.result), { type: "array" });
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
 
-    // Заголовки
     const header = XLSX.utils.sheet_to_json(sheet, { header: 1, range: 0 })[0];
     const keyMap = {};
     header.forEach((h, i) => keyMap[normalizeKey(h)] = i);
 
-    // Индексы колонок
     const col = {
       email: keyMap["email покупателя"],
       order: keyMap["номер заказа"],
@@ -96,31 +93,31 @@ function handleFile(e) {
     };
 
     const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, range: 1, defval: "" });
+
     const orders = {};
+    let skippedNoEmail = 0;
 
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
 
-      // EMAIL (строго)
       const email = col.email !== undefined ? String(row[col.email]).trim() : "";
-      if (!email) continue;
+      if (!email) {
+        skippedNoEmail++;
+        continue;
+      }
 
       const orderId = col.order !== undefined ? row[col.order] : "";
       const barcode = col.barcode !== undefined ? row[col.barcode] : "";
       const category = col.channel !== undefined ? row[col.channel] : "";
 
-      // PRICE
       let priceVal = col.price !== undefined
         ? parseFloat(String(row[col.price]).replace(",", "."))
         : 0;
       if (isNaN(priceVal)) priceVal = 0;
 
-      // DATE
       const paymentDt = formatDate(col.payment !== undefined ? row[col.payment] : "");
-      if (!paymentDt) continue; // защита
-      const transactionDt = paymentDt;
+      if (!paymentDt) continue;
 
-      // NAME
       let action = col.action ? row[keyMap[col.action]] : "";
       let dateVal = col.date ? row[keyMap[col.date]] : "";
 
@@ -131,7 +128,6 @@ function handleFile(e) {
       }
 
       const name = `${action} ${dateVal}`.trim();
-
       const key = `${orderId}_${email}`;
 
       if (!orders[key]) {
@@ -140,7 +136,7 @@ function handleFile(e) {
           addr_type: "email",
           transaction_id: orderId,
           transaction_status: 1,
-          transaction_dt: transactionDt,
+          transaction_dt: paymentDt,
           transaction_sum: 0,
           payment_dt: paymentDt,
           event_type: 1,
@@ -164,6 +160,12 @@ function handleFile(e) {
       ...o,
       transaction_sum: o.transaction_sum.toFixed(2)
     }));
+
+    // ===== СТАТИСТИКА =====
+    statsEl.textContent =
+      `📊 Всего строк в Excel: ${rows.length} | ` +
+      `🧾 Заказов сформировано: ${result.length} | ` +
+      `🚫 Пропущено без email: ${skippedNoEmail}`;
 
     outputEl.textContent = JSON.stringify(result, null, 2);
 
