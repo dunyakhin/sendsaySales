@@ -14,9 +14,7 @@
 
 <h2>Парсер Excel → JSON</h2>
 
-<!-- ВОТ ЗДЕСЬ выбираешь файл -->
 <input type="file" id="fileInput" accept=".xlsx,.xls">
-
 <button id="downloadBtn" style="display:none;">Скачать JSON</button>
 
 <div id="stats"></div>
@@ -34,7 +32,7 @@ function normalizeKey(key) {
 }
 
 function formatDate(value) {
-  if (value === null || value === undefined || value === "") return "";
+  if (!value && value !== 0) return "";
 
   const pad = n => String(n).padStart(2, "0");
 
@@ -72,6 +70,7 @@ function handleFile(e) {
 
   const reader = new FileReader();
   reader.onload = function(ev) {
+
     const workbook = XLSX.read(new Uint8Array(ev.target.result), { type: "array" });
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
 
@@ -86,6 +85,7 @@ function handleFile(e) {
       price: keyMap["оплата (руб.)"],
       channel: keyMap["канал продажи"],
       payment: keyMap["время создания билета"],
+      ticketType: keyMap["категория клиента"],
       action: Object.keys(keyMap).find(k => k.includes("действие")),
       date: Object.keys(keyMap).find(k => k.includes("дата"))
     };
@@ -106,6 +106,11 @@ function handleFile(e) {
       const orderId = col.order !== undefined ? row[col.order] : "";
       const barcode = col.barcode !== undefined ? row[col.barcode] : "";
       const category = col.channel !== undefined ? row[col.channel] : "";
+
+      const ticketType =
+        col.ticketType !== undefined
+          ? String(row[col.ticketType]).trim()
+          : "";
 
       let priceVal = col.price !== undefined
         ? parseFloat(String(row[col.price]).replace(",", "."))
@@ -147,7 +152,8 @@ function handleFile(e) {
         name,
         price: priceVal.toFixed(2),
         qnt: 1,
-        category
+        category,
+        ticket_type: ticketType
       });
 
       orders[key].transaction_sum += priceVal;
@@ -159,7 +165,7 @@ function handleFile(e) {
     }));
 
     statsEl.textContent =
-      `📊 Строк в Excel: ${rows.length} | ` +
+      `📊 Строк: ${rows.length} | ` +
       `🧾 Заказов: ${result.length} | ` +
       `🚫 Без email: ${skippedNoEmail}`;
 
@@ -182,3 +188,4 @@ function handleFile(e) {
 </script>
 </body>
 </html>
+
